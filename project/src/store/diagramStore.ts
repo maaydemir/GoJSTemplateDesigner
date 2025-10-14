@@ -23,9 +23,21 @@ export interface GraphElement {
   bindings: BindingConfig[]
 }
 
+interface DiagramSnapshot {
+  elements: GraphElement[]
+  selectedId: string | null
+}
+
+interface DiagramHistoryState {
+  past: DiagramSnapshot[]
+  future: DiagramSnapshot[]
+}
+
 export interface DiagramState {
   elements: GraphElement[]
   selectedId: string | null
+  canUndo: boolean
+  canRedo: boolean
   addElement: (element: Omit<GraphElement, 'id' | 'bindings' | 'properties'> & {
     properties?: GraphElement['properties']
     bindings?: BindingConfig[]
@@ -42,6 +54,9 @@ export interface DiagramState {
     updater: (binding: BindingConfig) => BindingConfig
   ) => void
   removeBinding: (elementId: string, bindingId: string) => void
+  undo: () => void
+  redo: () => void
+  history: DiagramHistoryState
 }
 
 const cloneValue = <T>(value: T): T => {
@@ -59,6 +74,22 @@ const cloneValue = <T>(value: T): T => {
 
   return value
 }
+
+const cloneElement = (element: GraphElement): GraphElement => ({
+  ...element,
+  properties: cloneValue(element.properties),
+  bindings: element.bindings.map(binding => ({ ...binding }))
+})
+
+const createSnapshot = (state: DiagramState): DiagramSnapshot => ({
+  elements: state.elements.map(cloneElement),
+  selectedId: state.selectedId
+})
+
+const applySnapshot = (snapshot: DiagramSnapshot) => ({
+  elements: snapshot.elements.map(cloneElement),
+  selectedId: snapshot.selectedId
+})
 
 const createGraphElement = ({
   type,
@@ -85,7 +116,7 @@ const createGraphElement = ({
     name: name ?? metadata.defaultName,
     parentId,
     properties: mergedProperties,
-    bindings: bindings ?? []
+    bindings: bindings ? bindings.map(binding => ({ ...binding })) : []
   }
 }
 
@@ -110,9 +141,15 @@ const buildChildrenIndex = (elements: GraphElement[]): Record<string, GraphEleme
   }, {})
 }
 
-export const useDiagramStore = create<DiagramState>((set, get) => ({
+export const useDiagramStore = create<DiagramState>((set) => ({
   elements: [createInitialNode()],
   selectedId: null,
+  canUndo: false,
+  canRedo: false,
+  history: {
+    past: [],
+    future: []
+  },
   addElement: ({ type, name, parentId, properties = {}, bindings = [] }) => {
     const element = createGraphElement({
       type,
@@ -122,94 +159,288 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
       bindings
     })
 
-    set(state => ({
-      elements: [...state.elements, element],
-      selectedId: element.id
-    }))
+    set(state => {
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements: [...state.elements, element],
+        selectedId: element.id,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
   },
   updateElement: (id, updater) => {
-    set(state => ({
-      elements: state.elements.map(element => (element.id === id ? updater(element) : element))
-    }))
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
+        if (element.id !== id) {
+          return element
+        }
+
+        const updated = updater(element)
+        if (updated !== element) {
+          didUpdate = true
+        }
+
+        return updated
+      })
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
   },
   selectElement: id => set({ selectedId: id }),
   removeElement: id => {
-    const state = get()
-    const index = buildChildrenIndex(state.elements)
-    const collect = (currentId: string, acc: Set<string>) => {
-      acc.add(currentId)
-      const children = index[currentId] ?? []
-      children.forEach(child => collect(child.id, acc))
-    }
+    set(state => {
+      if (!state.elements.some(element => element.id === id)) {
+        return {}
+      }
 
-    const toRemove = new Set<string>()
-    collect(id, toRemove)
+      const index = buildChildrenIndex(state.elements)
+      const collect = (currentId: string, acc: Set<string>) => {
+        acc.add(currentId)
+        const children = index[currentId] ?? []
+        children.forEach(child => collect(child.id, acc))
+      }
 
-    set(current => {
-      const remaining = current.elements.filter(element => !toRemove.has(element.id))
+      const toRemove = new Set<string>()
+      collect(id, toRemove)
+
+      const remaining = state.elements.filter(element => !toRemove.has(element.id))
       const hasRoot = remaining.some(element => element.parentId === null)
       const nextElements = hasRoot ? remaining : [createInitialNode()]
-      const selectedId = current.selectedId && toRemove.has(current.selectedId) ? null : current.selectedId
+      const selectedId = state.selectedId && toRemove.has(state.selectedId) ? null : state.selectedId
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
 
       return {
         elements: nextElements,
-        selectedId: hasRoot ? selectedId : null
+        selectedId: hasRoot ? selectedId : null,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
       }
     })
   },
   setProperty: (id, property, value) => {
     const clonedValue = cloneValue(value)
-    set(state => ({
-      elements: state.elements.map(element =>
-        element.id === id
-          ? { ...element, properties: { ...element.properties, [property]: clonedValue } }
-          : element
-      )
-    }))
-  },
-  removeProperty: (id, property) => {
-    set(state => ({
-      elements: state.elements.map(element => {
+
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
         if (element.id !== id) {
           return element
         }
 
+        didUpdate = true
+        return { ...element, properties: { ...element.properties, [property]: clonedValue } }
+      })
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  removeProperty: (id, property) => {
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
+        if (element.id !== id) {
+          return element
+        }
+
+        if (!(property in element.properties)) {
+          return element
+        }
+
+        didUpdate = true
         const { [property]: _removed, ...rest } = element.properties
         return { ...element, properties: rest }
       })
-    }))
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
   },
   addBinding: (elementId, binding) => {
     const entry: BindingConfig = { ...binding, id: nanoid() }
-    set(state => ({
-      elements: state.elements.map(element =>
-        element.id === elementId ? { ...element, bindings: [...element.bindings, entry] } : element
-      )
-    }))
-  },
-  updateBinding: (elementId, bindingId, updater) => {
-    set(state => ({
-      elements: state.elements.map(element => {
+
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
         if (element.id !== elementId) {
           return element
         }
 
-        return {
-          ...element,
-          bindings: element.bindings.map(binding =>
-            binding.id === bindingId ? updater(binding) : binding
-          )
-        }
+        didUpdate = true
+        return { ...element, bindings: [...element.bindings, entry] }
       })
-    }))
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  updateBinding: (elementId, bindingId, updater) => {
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
+        if (element.id !== elementId) {
+          return element
+        }
+
+        const bindings = element.bindings.map(binding => {
+          if (binding.id !== bindingId) {
+            return binding
+          }
+
+          const updated = updater(binding)
+          if (updated !== binding) {
+            didUpdate = true
+          }
+
+          return updated
+        })
+
+        if (!didUpdate && element.bindings.some(binding => binding.id === bindingId)) {
+          didUpdate = true
+        }
+
+        return { ...element, bindings }
+      })
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
   },
   removeBinding: (elementId, bindingId) => {
-    set(state => ({
-      elements: state.elements.map(element =>
-        element.id === elementId
-          ? { ...element, bindings: element.bindings.filter(binding => binding.id !== bindingId) }
-          : element
-      )
-    }))
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
+        if (element.id !== elementId) {
+          return element
+        }
+
+        const bindings = element.bindings.filter(binding => binding.id !== bindingId)
+        if (bindings.length === element.bindings.length) {
+          return element
+        }
+
+        didUpdate = true
+        return { ...element, bindings }
+      })
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  undo: () => {
+    set(state => {
+      const { past, future } = state.history
+      if (past.length === 0) {
+        return {}
+      }
+
+      const previous = past[past.length - 1]
+      const nextPast = past.slice(0, -1)
+      const currentSnapshot = createSnapshot(state)
+      const nextFuture = [currentSnapshot, ...future]
+      const applied = applySnapshot(previous)
+
+      return {
+        ...applied,
+        history: { past: nextPast, future: nextFuture },
+        canUndo: nextPast.length > 0,
+        canRedo: true
+      }
+    })
+  },
+  redo: () => {
+    set(state => {
+      const { past, future } = state.history
+      if (future.length === 0) {
+        return {}
+      }
+
+      const [next, ...remainingFuture] = future
+      const currentSnapshot = createSnapshot(state)
+      const nextPast = [...past, currentSnapshot]
+      const applied = applySnapshot(next)
+
+      return {
+        ...applied,
+        history: { past: nextPast, future: remainingFuture },
+        canUndo: true,
+        canRedo: remainingFuture.length > 0
+      }
+    })
   }
 }))
