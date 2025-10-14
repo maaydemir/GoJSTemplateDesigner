@@ -238,8 +238,7 @@ const TemplatePreview = () => {
       allowZoom: false,
       'animationManager.isEnabled': false,
       padding: 16,
-      contentAlignment: go.Spot.Center,
-      background: 'transparent'
+      contentAlignment: go.Spot.Center
     })
 
     diagramRef.current = diagram
@@ -258,21 +257,23 @@ const TemplatePreview = () => {
     }
 
     const root = elements.find(element => element.parentId === null)
+    const $ = go.GraphObject.make
     if (!root) {
+      diagram.nodeTemplate = $(go.Node, 'Auto')
       diagram.model = new go.GraphLinksModel()
+      diagram.scale = 1
       return
     }
 
-    const $ = go.GraphObject.make
     const childrenByParent = groupChildrenByParent(elements)
     const converters: Record<string, (value: unknown) => unknown> = {}
     const nodeTemplate = createGraphObject(root, childrenByParent, $, converters) as go.Node
 
-    diagram.startTransaction('update-preview')
     diagram.nodeTemplate = nodeTemplate
     const sampleData = buildSampleNodeData(elements)
-    diagram.model = new go.GraphLinksModel([{ key: 'preview-node', ...sampleData }])
-    diagram.commitTransaction('update-preview')
+    diagram.model = new go.GraphLinksModel({
+      nodeDataArray: [{ key: 'preview-node', ...sampleData }]
+    })
 
     if (diagram.nodes.count > 0) {
       diagram.zoomToFit()
