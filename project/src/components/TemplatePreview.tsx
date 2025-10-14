@@ -1,167 +1,299 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import * as go from 'gojs'
 import type { BindingConfig, GraphElement } from '@/store/diagramStore'
 import { useDiagramStore } from '@/store/diagramStore'
 
-interface PreviewNode {
-  id: string
-  name: string
-  type: GraphElement['type']
-  properties: GraphElement['properties']
-  bindings: BindingConfig[]
-  children: PreviewNode[]
+interface MarginValue {
+  top: number | null
+  right: number | null
+  bottom: number | null
+  left: number | null
 }
 
-const buildPreviewTree = (elements: GraphElement[]): PreviewNode | null => {
-  if (elements.length === 0) {
-    return null
+interface SizeValue {
+  width: number | null
+  height: number | null
+}
+
+const isMarginValue = (value: unknown): value is MarginValue => {
+  if (!value || typeof value !== 'object') {
+    return false
   }
 
-  const nodeMap = new Map<string, PreviewNode>()
-  const nodes: PreviewNode[] = elements.map(element => {
-    const node: PreviewNode = {
-      id: element.id,
-      name: element.name,
-      type: element.type,
-      properties: element.properties,
-      bindings: element.bindings,
-      children: []
-    }
-    nodeMap.set(element.id, node)
-    return node
-  })
+  const margin = value as Partial<MarginValue>
+  return (
+    'top' in margin &&
+    'right' in margin &&
+    'bottom' in margin &&
+    'left' in margin &&
+    (typeof margin.top === 'number' || margin.top === null) &&
+    (typeof margin.right === 'number' || margin.right === null) &&
+    (typeof margin.bottom === 'number' || margin.bottom === null) &&
+    (typeof margin.left === 'number' || margin.left === null)
+  )
+}
 
-  let root: PreviewNode | null = null
+const isSizeValue = (value: unknown): value is SizeValue => {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
 
-  elements.forEach((element, index) => {
-    const node = nodes[index]
-    if (element.parentId) {
-      const parent = nodeMap.get(element.parentId)
-      if (parent) {
-        parent.children.push(node)
-      }
+  const size = value as Partial<SizeValue>
+  return (
+    'width' in size &&
+    'height' in size &&
+    (typeof size.width === 'number' || size.width === null) &&
+    (typeof size.height === 'number' || size.height === null)
+  )
+}
+
+const normaliseMargin = (value: MarginValue): go.Margin => {
+  const toNumber = (input: number | null, fallback: number) =>
+    typeof input === 'number' && Number.isFinite(input) ? input : fallback
+
+  return new go.Margin(
+    toNumber(value.top, 0),
+    toNumber(value.right, 0),
+    toNumber(value.bottom, 0),
+    toNumber(value.left, 0)
+  )
+}
+
+const normaliseSize = (value: SizeValue): go.Size => {
+  const toComponent = (input: number | null) =>
+    typeof input === 'number' && Number.isFinite(input) ? input : NaN
+
+  return new go.Size(toComponent(value.width), toComponent(value.height))
+}
+
+const buildPropertyObject = (element: GraphElement): Record<string, unknown> => {
+  const entries: [string, unknown][] = []
+
+  Object.entries(element.properties).forEach(([key, value]) => {
+    if (value === null || value === undefined) {
       return
     }
 
-    root = node
+    if (element.type === 'node' && key === 'category') {
+      return
+    }
+
+    if (element.type === 'panel' && key === 'type') {
+      return
+    }
+
+    if (isMarginValue(value)) {
+      entries.push([key, normaliseMargin(value)])
+      return
+    }
+
+    if (isSizeValue(value)) {
+      entries.push([key, normaliseSize(value)])
+      return
+    }
+
+    entries.push([key, value])
   })
 
-  return root
+  if (!entries.some(([key]) => key === 'name')) {
+    entries.push(['name', element.name])
+  }
+
+  return Object.fromEntries(entries)
 }
 
-const formatPreviewValue = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return '—'
+const buildBindingArguments = (
+  bindings: BindingConfig[],
+  converters: Record<string, (value: unknown) => unknown>
+): go.Binding[] => {
+  return bindings.map(binding => {
+    const bindingInstance = new go.Binding(binding.prop, binding.path)
+
+    if (binding.twoWay) {
+      bindingInstance.makeTwoWay()
+    }
+
+    if (binding.converter) {
+      if (!converters[binding.converter]) {
+        converters[binding.converter] = value => value
+      }
+
+      bindingInstance.converter = converters[binding.converter]
+    }
+
+    return bindingInstance
+  })
+}
+
+const groupChildrenByParent = (elements: GraphElement[]): Map<string, GraphElement[]> => {
+  const map = new Map<string, GraphElement[]>()
+
+  elements.forEach(element => {
+    if (!element.parentId) {
+      return
+    }
+
+    if (!map.has(element.parentId)) {
+      map.set(element.parentId, [])
+    }
+
+    map.get(element.parentId)!.push(element)
+  })
+
+  return map
+}
+
+const createGraphObject = (
+  element: GraphElement,
+  childrenByParent: Map<string, GraphElement[]>,
+  $: typeof go.GraphObject.make,
+  converters: Record<string, (value: unknown) => unknown>
+): go.GraphObject => {
+  const childElements = childrenByParent.get(element.id) ?? []
+  const childGraphObjects = childElements.map(child =>
+    createGraphObject(child, childrenByParent, $, converters)
+  )
+  const propertyObject = buildPropertyObject(element)
+  const bindingArgs = buildBindingArguments(element.bindings, converters)
+  const args: unknown[] = []
+
+  if (element.type === 'node') {
+    const panelType = typeof element.properties.category === 'string' ? element.properties.category : 'Auto'
+    args.push(go.Node, panelType)
+  } else if (element.type === 'panel') {
+    const panelType = typeof element.properties.type === 'string' ? element.properties.type : 'Auto'
+    args.push(go.Panel, panelType)
+  } else if (element.type === 'shape') {
+    args.push(go.Shape)
+  } else if (element.type === 'text') {
+    args.push(go.TextBlock)
+  } else {
+    args.push(go.Picture)
   }
 
-  if (typeof value === 'string') {
-    return value
+  if (Object.keys(propertyObject).length > 0) {
+    args.push(propertyObject)
   }
 
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
+  args.push(...bindingArgs)
+  args.push(...childGraphObjects)
+
+  const make = $ as unknown as (...factoryArgs: unknown[]) => go.GraphObject
+
+  return make(...args)
+}
+
+const buildSampleNodeData = (elements: GraphElement[]): go.ObjectData => {
+  const sample: Record<string, unknown> = {
+    key: 'preview-node'
   }
 
-  if (Array.isArray(value)) {
-    return `[${value.map(formatPreviewValue).join(', ')}]`
-  }
+  elements.forEach(element => {
+    element.bindings.forEach(binding => {
+      if (sample[binding.path] !== undefined) {
+        return
+      }
 
-  if (typeof value === 'object') {
-    return '{…}'
-  }
+      const value = element.properties[binding.prop]
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+      ) {
+        sample[binding.path] = value
+        return
+      }
 
-  return '—'
+      if (value && typeof value === 'object') {
+        sample[binding.path] = value
+        return
+      }
+
+      sample[binding.path] = `Sample ${binding.path}`
+    })
+  })
+
+  return sample
 }
 
 const TemplatePreview = () => {
   const elements = useDiagramStore(state => state.elements)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const diagramRef = useRef<go.Diagram | null>(null)
+  const hasRenderableContent = useMemo(
+    () => elements.some(element => element.parentId !== null),
+    [elements]
+  )
 
-  const tree = useMemo(() => buildPreviewTree(elements), [elements])
+  useEffect(() => {
+    if (!containerRef.current || diagramRef.current) {
+      return
+    }
 
-  if (!tree) {
-    return (
-      <aside className='flex h-full flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400'>
-        <header className='space-y-1'>
-          <h3 className='text-sm font-semibold uppercase tracking-wide text-slate-200'>Template preview</h3>
-          <p className='text-xs text-slate-500'>Start by adding elements to the canvas to see a live summary.</p>
-        </header>
-      </aside>
-    )
-  }
+    const $ = go.GraphObject.make
+    const diagram = $(go.Diagram, containerRef.current, {
+      isReadOnly: true,
+      allowHorizontalScroll: false,
+      allowVerticalScroll: false,
+      allowZoom: false,
+      'animationManager.isEnabled': false,
+      padding: 16,
+      contentAlignment: go.Spot.Center,
+      background: 'transparent'
+    })
 
-  const renderNode = (node: PreviewNode, depth = 0): JSX.Element => {
-    const propertyEntries = Object.entries(node.properties)
-    const previewProperties = propertyEntries.slice(0, 3)
-    const remainingPropertyCount = propertyEntries.length - previewProperties.length
-    const previewBindings = node.bindings.slice(0, 3)
-    const remainingBindingCount = node.bindings.length - previewBindings.length
+    diagramRef.current = diagram
+    diagram.model = new go.GraphLinksModel()
 
-    return (
-      <li key={node.id} className={depth === 0 ? '' : 'space-y-3'}>
-        <div className='rounded-lg border border-slate-800 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/30'>
-          <div className='flex items-start justify-between gap-3'>
-            <div>
-              <p className='text-sm font-medium text-slate-100'>{node.name}</p>
-              <p className='text-xs text-slate-500'>
-                {node.children.length} {node.children.length === 1 ? 'child' : 'children'} ·{' '}
-                {propertyEntries.length} {propertyEntries.length === 1 ? 'property' : 'properties'}
-              </p>
-            </div>
-            <span className='rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-400'>
-              {node.type}
-            </span>
-          </div>
+    return () => {
+      diagram.div = null
+      diagramRef.current = null
+    }
+  }, [])
 
-          {previewProperties.length > 0 && (
-            <dl className='mt-3 grid gap-2 text-xs text-slate-300'>
-              {previewProperties.map(([key, value]) => (
-                <div key={key} className='grid grid-cols-[auto,1fr] items-baseline gap-2'>
-                  <dt className='uppercase tracking-wide text-slate-500'>{key}</dt>
-                  <dd className='truncate text-slate-200'>{formatPreviewValue(value)}</dd>
-                </div>
-              ))}
-              {remainingPropertyCount > 0 && (
-                <div className='text-[11px] text-slate-500'>+{remainingPropertyCount} more properties</div>
-              )}
-            </dl>
-          )}
+  useEffect(() => {
+    const diagram = diagramRef.current
+    if (!diagram) {
+      return
+    }
 
-          {previewBindings.length > 0 && (
-            <div className='mt-3 space-y-1 text-xs text-emerald-300'>
-              {previewBindings.map(binding => (
-                <div key={binding.id}>
-                  <span className='font-medium text-emerald-200'>{binding.prop}</span>
-                  <span className='text-emerald-400'> → </span>
-                  <span className='text-emerald-100'>{binding.path}</span>
-                  {binding.twoWay && <span className='ml-2 text-[10px] uppercase text-emerald-400'>Two-way</span>}
-                  {binding.converter && (
-                    <span className='ml-2 text-[10px] uppercase text-emerald-400'>Converter: {binding.converter}</span>
-                  )}
-                </div>
-              ))}
-              {remainingBindingCount > 0 && (
-                <p className='text-[11px] text-emerald-400'>+{remainingBindingCount} more bindings</p>
-              )}
-            </div>
-          )}
-        </div>
-        {node.children.length > 0 && (
-          <ul className='ml-4 mt-3 space-y-3 border-l border-slate-800 pl-4'>
-            {node.children.map(child => renderNode(child, depth + 1))}
-          </ul>
-        )}
-      </li>
-    )
-  }
+    const root = elements.find(element => element.parentId === null)
+    if (!root) {
+      diagram.model = new go.GraphLinksModel()
+      return
+    }
+
+    const $ = go.GraphObject.make
+    const childrenByParent = groupChildrenByParent(elements)
+    const converters: Record<string, (value: unknown) => unknown> = {}
+    const nodeTemplate = createGraphObject(root, childrenByParent, $, converters) as go.Node
+
+    diagram.startTransaction('update-preview')
+    diagram.nodeTemplate = nodeTemplate
+    const sampleData = buildSampleNodeData(elements)
+    diagram.model = new go.GraphLinksModel([{ key: 'preview-node', ...sampleData }])
+    diagram.commitTransaction('update-preview')
+
+    if (diagram.nodes.count > 0) {
+      diagram.zoomToFit()
+    } else {
+      diagram.scale = 1
+    }
+  }, [elements])
 
   return (
     <aside className='flex h-full min-h-[280px] flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/70 p-4'>
       <header className='space-y-1'>
         <h3 className='text-sm font-semibold uppercase tracking-wide text-slate-200'>Template preview</h3>
-        <p className='text-xs text-slate-500'>Live summary of the node hierarchy, properties and bindings.</p>
+        <p className='text-xs text-slate-500'>See how the current template renders inside a GoJS diagram.</p>
       </header>
-      <div className='max-h-full overflow-y-auto pr-1 text-sm'>
-        <ul className='space-y-4'>{renderNode(tree)}</ul>
-      </div>
+      <div
+        ref={containerRef}
+        className='relative flex-1 min-h-[240px] overflow-hidden rounded-lg border border-slate-800 bg-slate-950/60'
+      />
+      {!hasRenderableContent && (
+        <p className='text-xs text-slate-500'>Add panels, shapes or text blocks to the template to see them rendered live.</p>
+      )}
     </aside>
   )
 }

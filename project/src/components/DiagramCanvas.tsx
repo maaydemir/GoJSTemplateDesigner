@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as go from 'gojs'
 import { useDiagramStore } from '@/store/diagramStore'
 import type { DiagramState, GraphElement, GraphObjectType } from '@/store/diagramStore'
-import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
-import { GRAPH_OBJECT_DRAG_TYPE, generateElementName, isGraphObjectType } from '@/utils/graphElements'
+import { GRAPH_OBJECT_DRAG_TYPE, generateElementName, isGraphObjectType, findAcceptingParent } from '@/utils/graphElements'
 
 const syncDiagramModel = (diagram: go.Diagram, elements: GraphElement[], selectedId: string | null) => {
   const model = diagram.model as go.TreeModel
@@ -74,11 +73,6 @@ const DiagramCanvas = () => {
   const [hasChildElements, setHasChildElements] = useState(() => {
     const { elements } = useDiagramStore.getState()
     return elements.some(element => element.parentId !== null)
-  })
-  const [rootElementName, setRootElementName] = useState(() => {
-    const { elements } = useDiagramStore.getState()
-    const root = elements.find(element => element.parentId === null)
-    return root?.name ?? 'the root node'
   })
 
   useEffect(() => {
@@ -152,8 +146,6 @@ const DiagramCanvas = () => {
     const handleStateChange = (state: DiagramState) => {
       syncDiagramModel(diagram, state.elements, state.selectedId)
       setHasChildElements(state.elements.some(element => element.parentId !== null))
-      const root = state.elements.find(element => element.parentId === null)
-      setRootElementName(root?.name ?? 'the root node')
     }
 
     const unsubscribe = useDiagramStore.subscribe(handleStateChange)
@@ -189,20 +181,28 @@ const DiagramCanvas = () => {
     }
 
     const type: GraphObjectType = typeValue
+    const diagram = diagramRef.current
+    const container = containerRef.current
     const { elements, addElement } = useDiagramStore.getState()
-    const rootElement = elements.find(element => element.parentId === null)
-    if (!rootElement) {
+
+    if (!diagram || !container) {
       return
     }
 
-    const parentMetadata = graphObjectMetadata[rootElement.type]
-    if (!parentMetadata.allowedChildren.includes(type)) {
+    const rect = container.getBoundingClientRect()
+    const viewPoint = new go.Point(event.clientX - rect.left, event.clientY - rect.top)
+    const documentPoint = diagram.transformViewToDoc(viewPoint)
+    const part = diagram.findPartAt(documentPoint, true)
+    const targetParentId = (part?.data?.key as string | undefined) ?? null
+    const parent = findAcceptingParent(elements, targetParentId, type)
+
+    if (!parent) {
       return
     }
 
     addElement({
       type,
-      parentId: rootElement.id,
+      parentId: parent.id,
       name: generateElementName(type)
     })
   }
@@ -266,7 +266,7 @@ const DiagramCanvas = () => {
             Release to add
           </span>
           <p className='max-w-[260px] text-xs text-emerald-100/80'>
-            The new element will be nested under {rootElementName}.
+            Drop the element over a compatible parent to automatically nest it.
           </p>
         </div>
       )}
