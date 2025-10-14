@@ -2,50 +2,13 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as go from 'gojs'
 import type { BindingConfig, GraphElement } from '@/store/diagramStore'
 import { useDiagramStore } from '@/store/diagramStore'
-
-interface MarginValue {
-  top: number | null
-  right: number | null
-  bottom: number | null
-  left: number | null
-}
-
-interface SizeValue {
-  width: number | null
-  height: number | null
-}
-
-const isMarginValue = (value: unknown): value is MarginValue => {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const margin = value as Partial<MarginValue>
-  return (
-    'top' in margin &&
-    'right' in margin &&
-    'bottom' in margin &&
-    'left' in margin &&
-    (typeof margin.top === 'number' || margin.top === null) &&
-    (typeof margin.right === 'number' || margin.right === null) &&
-    (typeof margin.bottom === 'number' || margin.bottom === null) &&
-    (typeof margin.left === 'number' || margin.left === null)
-  )
-}
-
-const isSizeValue = (value: unknown): value is SizeValue => {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const size = value as Partial<SizeValue>
-  return (
-    'width' in size &&
-    'height' in size &&
-    (typeof size.width === 'number' || size.width === null) &&
-    (typeof size.height === 'number' || size.height === null)
-  )
-}
+import {
+  getRenderableProperties,
+  isMarginValue,
+  isSizeValue,
+  type MarginValue,
+  type SizeValue
+} from '@/utils/graphObjectProperties'
 
 const normaliseMargin = (value: MarginValue): go.Margin => {
   const toNumber = (input: number | null, fallback: number) =>
@@ -69,19 +32,7 @@ const normaliseSize = (value: SizeValue): go.Size => {
 const buildPropertyObject = (element: GraphElement): Record<string, unknown> => {
   const entries: [string, unknown][] = []
 
-  Object.entries(element.properties).forEach(([key, value]) => {
-    if (value === null || value === undefined) {
-      return
-    }
-
-    if (element.type === 'node' && key === 'category') {
-      return
-    }
-
-    if (element.type === 'panel' && key === 'type') {
-      return
-    }
-
+  getRenderableProperties(element).forEach(({ key, value }) => {
     if (isMarginValue(value)) {
       entries.push([key, normaliseMargin(value)])
       return
@@ -94,10 +45,6 @@ const buildPropertyObject = (element: GraphElement): Record<string, unknown> => 
 
     entries.push([key, value])
   })
-
-  if (!entries.some(([key]) => key === 'name')) {
-    entries.push(['name', element.name])
-  }
 
   return Object.fromEntries(entries)
 }
