@@ -2,6 +2,7 @@ import type { FC } from 'react'
 import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 import type { GraphObjectType } from '@/store/diagramStore'
 import { useDiagramStore } from '@/store/diagramStore'
+import { GRAPH_OBJECT_DRAG_TYPE, generateElementName } from '@/utils/graphElements'
 
 const paletteTypes: GraphObjectType[] = ['panel', 'shape', 'text', 'picture']
 
@@ -23,22 +24,28 @@ const PalettePanel: FC = () => {
     <aside className='flex h-full min-w-[220px] flex-col gap-4 border-r border-slate-800 bg-panel p-4'>
       <div>
         <h2 className='text-sm font-semibold uppercase tracking-wide text-slate-200'>Palette</h2>
-        <p className='text-xs text-slate-500'>Drop targets will be implemented later.</p>
+        <p className='text-xs text-slate-500'>Drag items onto the canvas or click to add them.</p>
       </div>
       <div className='flex flex-col gap-3'>
         {paletteItems.map(item => (
           <button
             key={item.type}
             type='button'
+            draggable
             onClick={() =>
               addElement({
                 type: item.type,
-                name: `${item.defaultName} ${Math.floor(Math.random() * 90) + 10}`,
+                name: generateElementName(item.type),
                 parentId: root?.id ?? null
               })
             }
+            onDragStart={event => {
+              event.dataTransfer.setData(GRAPH_OBJECT_DRAG_TYPE, item.type)
+              event.dataTransfer.effectAllowed = 'copy'
+              event.dataTransfer.setData('text/plain', item.label)
+            }}
             className={[
-              'rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-left text-sm text-slate-200',
+              'cursor-grab rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-left text-sm text-slate-200',
               'transition hover:border-slate-500 hover:bg-slate-700'
             ].join(' ')}
           >
