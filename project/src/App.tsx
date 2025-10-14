@@ -2,6 +2,7 @@ import Header from './components/Header'
 import PalettePanel from './components/PalettePanel'
 import DiagramCanvas from './components/DiagramCanvas'
 import InspectorPanel from './components/InspectorPanel'
+import TemplatePreview from './components/TemplatePreview'
 
 const App = () => (
   <div className='flex h-full min-h-screen flex-col bg-slate-950 text-slate-100'>
@@ -35,8 +36,9 @@ const App = () => (
             </button>
           </div>
         </div>
-        <div className='flex h-full flex-1 rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-lg shadow-slate-900/40'>
+        <div className='grid h-full flex-1 gap-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-lg shadow-slate-900/40 lg:grid-cols-[2fr,1fr]'>
           <DiagramCanvas />
+          <TemplatePreview />
         </div>
       </section>
       <InspectorPanel />
