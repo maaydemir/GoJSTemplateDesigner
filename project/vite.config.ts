@@ -7,5 +7,12 @@ export default defineConfig({
     alias: {
       '@': '/src'
     }
+  },
+  optimizeDeps: {
+    include: [
+      'monaco-editor/esm/vs/editor/editor.api',
+      'monaco-editor/esm/vs/language/typescript/monaco.contribution',
+      'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'
+    ]
   }
 })
