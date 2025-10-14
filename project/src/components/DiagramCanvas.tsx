@@ -2,20 +2,84 @@ import type { DragEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import * as go from 'gojs'
 import { useDiagramStore } from '@/store/diagramStore'
-import type { GraphObjectType } from '@/store/diagramStore'
+import type { DiagramState, GraphElement, GraphObjectType } from '@/store/diagramStore'
 import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 import { GRAPH_OBJECT_DRAG_TYPE, generateElementName, isGraphObjectType } from '@/utils/graphElements'
+
+const syncDiagramModel = (diagram: go.Diagram, elements: GraphElement[], selectedId: string | null) => {
+  const model = diagram.model as go.TreeModel
+  diagram.startTransaction('sync-diagram')
+
+  const desiredKeys = new Set(elements.map(element => element.id))
+
+  elements.forEach(element => {
+    const data = model.findNodeDataForKey(element.id) as go.ObjectData | null
+    const parent = element.parentId ?? undefined
+    const isSelected = element.id === selectedId
+
+    if (data) {
+      if (data.name !== element.name) {
+        model.setDataProperty(data, 'name', element.name)
+      }
+      if (data.type !== element.type) {
+        model.setDataProperty(data, 'type', element.type)
+      }
+      if (data.parent !== parent) {
+        model.setDataProperty(data, 'parent', parent)
+      }
+      if (data.selected !== isSelected) {
+        model.setDataProperty(data, 'selected', isSelected)
+      }
+    } else {
+      model.addNodeData({
+        key: element.id,
+        name: element.name,
+        type: element.type,
+        parent,
+        selected: isSelected
+      })
+    }
+  })
+
+  const toRemove: go.ObjectData[] = []
+  Array.from(model.nodeDataArray).forEach(nodeData => {
+    const key = nodeData.key as string
+    if (!desiredKeys.has(key)) {
+      toRemove.push(nodeData)
+    }
+  })
+
+  toRemove.forEach(nodeData => {
+    model.removeNodeData(nodeData)
+  })
+
+  diagram.commitTransaction('sync-diagram')
+
+  if (selectedId) {
+    const part = diagram.findPartForKey(selectedId)
+    if (part) {
+      diagram.select(part)
+      return
+    }
+  }
+
+  diagram.clearSelection()
+}
 
 const DiagramCanvas = () => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const diagramRef = useRef<go.Diagram | null>(null)
   const dragCounterRef = useRef(0)
   const [isDragOver, setIsDragOver] = useState(false)
-  const elements = useDiagramStore(state => state.elements)
-  const selectElement = useDiagramStore(state => state.selectElement)
-  const selectedId = useDiagramStore(state => state.selectedId)
-  const addElement = useDiagramStore(state => state.addElement)
-  const rootElement = useDiagramStore(state => state.elements.find(element => element.parentId === null))
+  const [hasChildElements, setHasChildElements] = useState(() => {
+    const { elements } = useDiagramStore.getState()
+    return elements.some(element => element.parentId !== null)
+  })
+  const [rootElementName, setRootElementName] = useState(() => {
+    const { elements } = useDiagramStore.getState()
+    const root = elements.find(element => element.parentId === null)
+    return root?.name ?? 'the root node'
+  })
 
   useEffect(() => {
     if (!containerRef.current || diagramRef.current) {
@@ -25,8 +89,7 @@ const DiagramCanvas = () => {
     const $ = go.GraphObject.make
     const diagram = $(go.Diagram, containerRef.current, {
       layout: $(go.TreeLayout, { angle: 90, layerSpacing: 40 }),
-      padding: 20,
-      background: '#1a1f2b'
+      padding: 20
     })
 
     diagram.nodeTemplate = $(
@@ -73,41 +136,35 @@ const DiagramCanvas = () => {
 
     diagram.addDiagramListener('ChangedSelection', () => {
       const first = diagram.selection.first()
-      if (first?.data?.key) {
-        selectElement(first.data.key as string)
-      } else {
-        selectElement(null)
+      const state = useDiagramStore.getState()
+      const currentId = state.selectedId
+      const nextId = (first?.data?.key as string | undefined) ?? null
+
+      if (currentId !== nextId) {
+        state.selectElement(nextId)
       }
     })
 
     diagramRef.current = diagram
-  }, [selectElement])
 
-  useEffect(() => {
-    const diagram = diagramRef.current
-    if (!diagram) {
-      return
+    diagram.model = new go.TreeModel()
+
+    const handleStateChange = (state: DiagramState) => {
+      syncDiagramModel(diagram, state.elements, state.selectedId)
+      setHasChildElements(state.elements.some(element => element.parentId !== null))
+      const root = state.elements.find(element => element.parentId === null)
+      setRootElementName(root?.name ?? 'the root node')
     }
 
-    const model = new go.TreeModel()
-    model.nodeDataArray = elements.map(element => ({
-      key: element.id,
-      name: element.name,
-      type: element.type,
-      parent: element.parentId ?? undefined,
-      selected: element.id === selectedId
-    }))
-    diagram.model = model
+    const unsubscribe = useDiagramStore.subscribe(handleStateChange)
+    handleStateChange(useDiagramStore.getState())
 
-    if (selectedId) {
-      const part = diagram.findPartForKey(selectedId)
-      if (part) {
-        diagram.select(part)
-      }
-    } else {
-      diagram.clearSelection()
+    return () => {
+      unsubscribe()
+      diagram.div = null
+      diagramRef.current = null
     }
-  }, [elements, selectedId])
+  }, [])
 
   const isPaletteDrag = (event: DragEvent<HTMLDivElement>) =>
     event.dataTransfer.types.includes(GRAPH_OBJECT_DRAG_TYPE)
@@ -132,6 +189,8 @@ const DiagramCanvas = () => {
     }
 
     const type: GraphObjectType = typeValue
+    const { elements, addElement } = useDiagramStore.getState()
+    const rootElement = elements.find(element => element.parentId === null)
     if (!rootElement) {
       return
     }
@@ -170,7 +229,6 @@ const DiagramCanvas = () => {
     }
   }
 
-  const hasChildElements = elements.some(element => element.parentId !== null)
   const canvasClasses = [
     'h-full w-full rounded-lg border border-slate-800 bg-canvas shadow-inner transition-colors',
     isDragOver ? 'border-emerald-400 ring-2 ring-emerald-500/40' : ''
@@ -208,7 +266,7 @@ const DiagramCanvas = () => {
             Release to add
           </span>
           <p className='max-w-[260px] text-xs text-emerald-100/80'>
-            The new element will be nested under {rootElement?.name ?? 'the root node'}.
+            The new element will be nested under {rootElementName}.
           </p>
         </div>
       )}
