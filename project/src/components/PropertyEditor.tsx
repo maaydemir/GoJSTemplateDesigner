@@ -304,7 +304,8 @@ const renderSelectOptions = (options: SelectOption[] | undefined) => {
 const filterProperties = (
   descriptors: GraphObjectPropertyDescriptor[],
   advanced: boolean
-): GraphObjectPropertyDescriptor[] => descriptors.filter(descriptor => descriptor.advanced === advanced)
+): GraphObjectPropertyDescriptor[] =>
+  descriptors.filter(descriptor => (descriptor.advanced ?? false) === advanced)
 
 interface PropertyEditorProps {
   element: GraphElement
