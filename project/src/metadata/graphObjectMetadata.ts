@@ -105,6 +105,19 @@ const sharedGraphObjectProperties: GraphObjectPropertyDescriptor[] = [
     }
   },
   {
+    name: 'desiredSize',
+    label: 'Desired Size',
+    description:
+      'Preferred width and height applied to the GraphObject. Layouts may override this value.',
+    defaultValue: { width: null, height: null },
+    control: {
+      type: 'size',
+      axisLabels: ['Width', 'Height'],
+      min: 0
+    },
+    advanced: true
+  },
+  {
     name: 'angle',
     label: 'Angle',
     description: 'Rotation in degrees applied to this object.',
@@ -266,17 +279,6 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
           min: 0,
           step: 0.5
         }
-      },
-      {
-        name: 'desiredSize',
-        label: 'Desired Size',
-        description: 'Preferred width and height of the shape. The layout may override this value.',
-        control: {
-          type: 'size',
-          axisLabels: ['Width', 'Height'],
-          min: 0
-        },
-        advanced: true
       }
     ])
   },
@@ -356,16 +358,6 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         control: {
           type: 'text',
           placeholder: 'https://example.com/image.png'
-        }
-      },
-      {
-        name: 'desiredSize',
-        label: 'Desired Size',
-        description: 'Preferred image size expressed in pixels.',
-        control: {
-          type: 'size',
-          axisLabels: ['Width', 'Height'],
-          min: 0
         }
       },
       {
