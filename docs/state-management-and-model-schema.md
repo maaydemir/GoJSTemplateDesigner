@@ -20,6 +20,11 @@ Bu doküman, GoJS Node Template Designer uygulamasında kullanılan istemci tara
 | `updateElement` | Fonksiyon | Verilen `id`'ye sahip öğeyi saf (immutably) şekilde günceller. |
 | `selectElement` | Fonksiyon | Kullanıcının seçimini günceller; `null` değeri seçim temizliği anlamına gelir. |
 | `removeElement` | Fonksiyon | Seçilen öğeyi ve tüm alt öğelerini siler, gerekirse yeni varsayılan kök oluşturur. |
+| `setProperty` | Fonksiyon | Belirtilen özelliğe derin kopyalanmış (`cloneValue`) yeni bir değer yazar; inspector kontrolleri için temel sağlar. |
+| `removeProperty` | Fonksiyon | Özellik sözlüğünden bir anahtarı siler; özel alanların kaldırılması için kullanılır. |
+| `addBinding` | Fonksiyon | `nanoid` ile benzersiz `id` üreterek yeni bir binding kaydı ekler. |
+| `updateBinding` | Fonksiyon | Var olan binding'i, fonksiyon tabanlı immutability yaklaşımıyla günceller. |
+| `removeBinding` | Fonksiyon | Bir binding kaydını kimliğine göre filtreleyerek kaldırır. |
 
 ### Kimlik ve Varsayılanlar
 
@@ -46,14 +51,21 @@ Bu doküman, GoJS Node Template Designer uygulamasında kullanılan istemci tara
 | `properties` | `Record<string, unknown>` | GoJS özellik değerleri. Metadata `properties` listesi inspector kontrollerinin nasıl oluşturulacağını belirler. |
 | `bindings` | `BindingConfig[]` | Model ile GoJS özellikleri arasındaki veri bağlarını tanımlar. |
 
+### Binding kimlikleri
+
+Binding tanımları `BindingConfig` arayüzü ile standartlaştırılır ve her kayıt `nanoid` tarafından üretilen benzersiz bir `id` taşır. Bu `id`, inspector arayüzünde listedeki binding'lerin güvenle güncellenip silinebilmesini sağlar.
+
 ### BindingConfig Şeması
 
 Binding tanımları `BindingConfig` arayüzü ile standartlaştırılır:
 
+- `id`: UI listelerinde referans alınan benzersiz kimlik.
 - `prop`: GoJS özelliği (ör. `text`, `fill`).
 - `path`: Diyagram veri modelindeki alan (ör. `name`, `loc`).
 - `twoWay`: `true` olduğunda GoJS binding iki yönlü olarak yapılandırılır.
 - `converter`: Opsiyonel dönüştürücü fonksiyon adı. Kod üretimi sırasında aynı isimli stub fonksiyon eklenir.
+
+Binding oluşturmak için kullanılan `BindingInput` tipi, `id` alanı olmadan `prop`, `path`, `twoWay` ve `converter` alanlarını kapsar. Store `addBinding` çağrısı sırasında bu input'u alır ve uygun `id` değerini ekler.
 
 ## Store İş Akışları
 

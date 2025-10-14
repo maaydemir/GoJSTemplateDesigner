@@ -12,6 +12,8 @@ export interface BindingConfig {
   converter?: string
 }
 
+export type BindingInput = Omit<BindingConfig, 'id'>
+
 export interface GraphElement {
   id: string
   type: GraphObjectType
@@ -31,6 +33,15 @@ export interface DiagramState {
   updateElement: (id: string, updater: (element: GraphElement) => GraphElement) => void
   selectElement: (id: string | null) => void
   removeElement: (id: string) => void
+  setProperty: (id: string, property: string, value: unknown) => void
+  removeProperty: (id: string, property: string) => void
+  addBinding: (elementId: string, binding: BindingInput) => void
+  updateBinding: (
+    elementId: string,
+    bindingId: string,
+    updater: (binding: BindingConfig) => BindingConfig
+  ) => void
+  removeBinding: (elementId: string, bindingId: string) => void
 }
 
 const cloneValue = <T>(value: T): T => {
@@ -145,5 +156,60 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
         selectedId: hasRoot ? selectedId : null
       }
     })
+  },
+  setProperty: (id, property, value) => {
+    const clonedValue = cloneValue(value)
+    set(state => ({
+      elements: state.elements.map(element =>
+        element.id === id
+          ? { ...element, properties: { ...element.properties, [property]: clonedValue } }
+          : element
+      )
+    }))
+  },
+  removeProperty: (id, property) => {
+    set(state => ({
+      elements: state.elements.map(element => {
+        if (element.id !== id) {
+          return element
+        }
+
+        const { [property]: _removed, ...rest } = element.properties
+        return { ...element, properties: rest }
+      })
+    }))
+  },
+  addBinding: (elementId, binding) => {
+    const entry: BindingConfig = { ...binding, id: nanoid() }
+    set(state => ({
+      elements: state.elements.map(element =>
+        element.id === elementId ? { ...element, bindings: [...element.bindings, entry] } : element
+      )
+    }))
+  },
+  updateBinding: (elementId, bindingId, updater) => {
+    set(state => ({
+      elements: state.elements.map(element => {
+        if (element.id !== elementId) {
+          return element
+        }
+
+        return {
+          ...element,
+          bindings: element.bindings.map(binding =>
+            binding.id === bindingId ? updater(binding) : binding
+          )
+        }
+      })
+    }))
+  },
+  removeBinding: (elementId, bindingId) => {
+    set(state => ({
+      elements: state.elements.map(element =>
+        element.id === elementId
+          ? { ...element, bindings: element.bindings.filter(binding => binding.id !== bindingId) }
+          : element
+      )
+    }))
   }
 }))
