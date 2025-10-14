@@ -82,7 +82,12 @@ const DiagramCanvas = () => {
 
     const $ = go.GraphObject.make
     const diagram = $(go.Diagram, containerRef.current, {
-      layout: $(go.TreeLayout, { angle: 90, layerSpacing: 40 }),
+      layout: $(go.TreeLayout, {
+        angle: 0,
+        layerSpacing: 40,
+        nodeSpacing: 24,
+        arrangementSpacing: new go.Size(24, 16)
+      }),
       padding: 20
     })
 
@@ -94,11 +99,18 @@ const DiagramCanvas = () => {
         cursor: 'pointer'
       },
       new go.Binding('isSelected', 'selected'),
-      $(go.Shape, 'RoundedRectangle', {
-        fill: '#334155',
-        stroke: '#475569',
-        strokeWidth: 1.5
-      }),
+      $(
+        go.Shape,
+        'RoundedRectangle',
+        {
+          fill: '#334155',
+          stroke: '#475569',
+          strokeWidth: 1.5
+        },
+        new go.Binding('fill', 'selected', selected => (selected ? '#1e293b' : '#334155')),
+        new go.Binding('stroke', 'selected', selected => (selected ? '#38bdf8' : '#475569')),
+        new go.Binding('strokeWidth', 'selected', selected => (selected ? 2.4 : 1.5))
+      ),
       $(
         go.Panel,
         'Table',
@@ -126,6 +138,16 @@ const DiagramCanvas = () => {
           new go.Binding('text', 'type', type => type.toUpperCase())
         )
       )
+    )
+
+    diagram.linkTemplate = $(
+      go.Link,
+      {
+        routing: go.Link.Orthogonal,
+        corner: 6,
+        selectable: false
+      },
+      $(go.Shape, { stroke: '#475569', strokeWidth: 1.2 })
     )
 
     diagram.addDiagramListener('ChangedSelection', () => {
