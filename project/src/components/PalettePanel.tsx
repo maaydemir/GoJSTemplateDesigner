@@ -2,7 +2,7 @@ import type { FC } from 'react'
 import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 import type { GraphObjectType } from '@/store/diagramStore'
 import { useDiagramStore } from '@/store/diagramStore'
-import { GRAPH_OBJECT_DRAG_TYPE, generateElementName } from '@/utils/graphElements'
+import { GRAPH_OBJECT_DRAG_TYPE, findAcceptingParent, generateElementName } from '@/utils/graphElements'
 
 const paletteTypes: GraphObjectType[] = ['panel', 'shape', 'text', 'picture']
 
@@ -17,7 +17,6 @@ const paletteItems = paletteTypes.map(type => {
 })
 
 const PalettePanel: FC = () => {
-  const root = useDiagramStore(state => state.elements.find(element => element.parentId === null))
   const addElement = useDiagramStore(state => state.addElement)
 
   return (
@@ -32,13 +31,19 @@ const PalettePanel: FC = () => {
             key={item.type}
             type='button'
             draggable
-            onClick={() =>
+            onClick={() => {
+              const { elements, selectedId } = useDiagramStore.getState()
+              const parent = findAcceptingParent(elements, selectedId, item.type)
+              if (!parent) {
+                return
+              }
+
               addElement({
                 type: item.type,
                 name: generateElementName(item.type),
-                parentId: root?.id ?? null
+                parentId: parent.id
               })
-            }
+            }}
             onDragStart={event => {
               event.dataTransfer.setData(GRAPH_OBJECT_DRAG_TYPE, item.type)
               event.dataTransfer.effectAllowed = 'copy'
