@@ -71,6 +71,59 @@ export interface GraphObjectMetadata {
 
 export type GraphObjectMetadataMap = Record<GraphObjectType, GraphObjectMetadata>
 
+const sharedAlignmentOptions: SelectOption[] = [
+  { label: 'Center', value: 'Center' },
+  { label: 'Top Left', value: 'TopLeft' },
+  { label: 'Top', value: 'Top' },
+  { label: 'Top Right', value: 'TopRight' },
+  { label: 'Left', value: 'Left' },
+  { label: 'Right', value: 'Right' },
+  { label: 'Bottom Left', value: 'BottomLeft' },
+  { label: 'Bottom', value: 'Bottom' },
+  { label: 'Bottom Right', value: 'BottomRight' }
+]
+
+const sharedGraphObjectProperties: GraphObjectPropertyDescriptor[] = [
+  {
+    name: 'margin',
+    label: 'Margin',
+    description: 'Spacing applied around this object relative to its parent panel.',
+    defaultValue: { top: null, right: null, bottom: null, left: null },
+    control: {
+      type: 'margin',
+      axisLabels: ['Top', 'Right', 'Bottom', 'Left']
+    }
+  },
+  {
+    name: 'alignment',
+    label: 'Alignment',
+    description: 'Spot used to align this object within its parent panel.',
+    defaultValue: 'Center',
+    control: {
+      type: 'select',
+      options: sharedAlignmentOptions
+    }
+  },
+  {
+    name: 'angle',
+    label: 'Angle',
+    description: 'Rotation in degrees applied to this object.',
+    defaultValue: 0,
+    control: {
+      type: 'number',
+      min: 0,
+      max: 360,
+      step: 1
+    }
+  }
+]
+
+const withSharedProperties = (
+  properties: GraphObjectPropertyDescriptor[]
+): GraphObjectPropertyDescriptor[] => {
+  return [...properties, ...sharedGraphObjectProperties]
+}
+
 export const graphObjectMetadata: GraphObjectMetadataMap = {
   node: {
     type: 'node',
@@ -84,7 +137,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
     defaultProperties: {
       category: 'Auto'
     },
-    properties: [
+    properties: withSharedProperties([
       {
         name: 'category',
         label: 'Category',
@@ -117,7 +170,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         },
         advanced: true
       }
-    ]
+    ])
   },
   panel: {
     type: 'panel',
@@ -130,7 +183,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
     defaultProperties: {
       type: 'Auto'
     },
-    properties: [
+    properties: withSharedProperties([
       {
         name: 'type',
         label: 'Panel Type',
@@ -157,7 +210,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         },
         advanced: true
       }
-    ]
+    ])
   },
   shape: {
     type: 'shape',
@@ -172,7 +225,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
       fill: '#475569',
       stroke: '#1e293b'
     },
-    properties: [
+    properties: withSharedProperties([
       {
         name: 'figure',
         label: 'Figure',
@@ -225,7 +278,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         },
         advanced: true
       }
-    ]
+    ])
   },
   text: {
     type: 'text',
@@ -239,7 +292,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
       text: 'TextBlock',
       stroke: '#f8fafc'
     },
-    properties: [
+    properties: withSharedProperties([
       {
         name: 'text',
         label: 'Text',
@@ -281,7 +334,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         },
         advanced: true
       }
-    ]
+    ])
   },
   picture: {
     type: 'picture',
@@ -295,7 +348,7 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
       source: '',
       desiredSize: { width: 64, height: 64 }
     },
-    properties: [
+    properties: withSharedProperties([
       {
         name: 'source',
         label: 'Image Source',
@@ -330,6 +383,6 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         },
         advanced: true
       }
-    ]
+    ])
   }
 }
