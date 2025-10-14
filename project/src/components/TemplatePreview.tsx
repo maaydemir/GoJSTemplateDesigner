@@ -11,6 +11,7 @@ import {
   type MarginValue,
   type SizeValue
 } from '@/utils/graphObjectProperties'
+import { isGoSpotName, type GoSpotName } from '@/constants/goSpot'
 
 const normaliseMargin = (value: MarginValue): go.Margin => {
   const toNumber = (input: number | null, fallback: number) =>
@@ -31,6 +32,13 @@ const normaliseSize = (value: SizeValue): go.Size => {
   return new go.Size(toComponent(value.width), toComponent(value.height))
 }
 
+const SPOT_PROPERTY_KEYS = new Set(['alignment', 'locationSpot'])
+
+const toGoSpot = (value: GoSpotName): go.Spot | null => {
+  const record = go.Spot as unknown as Record<string, go.Spot | undefined>
+  return record[value] ?? null
+}
+
 interface PropertyAssignment {
   key: string
   rawValue: unknown
@@ -49,6 +57,14 @@ const buildPropertyAssignments = (element: GraphElement): PropertyAssignment[] =
     if (isSizeValue(value)) {
       entries.push({ key, rawValue: value, preparedValue: normaliseSize(value) })
       return
+    }
+
+    if (SPOT_PROPERTY_KEYS.has(key) && isGoSpotName(value)) {
+      const spot = toGoSpot(value)
+      if (spot) {
+        entries.push({ key, rawValue: value, preparedValue: spot })
+        return
+      }
     }
 
     entries.push({ key, rawValue: value, preparedValue: value })

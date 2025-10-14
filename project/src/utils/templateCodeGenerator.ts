@@ -5,11 +5,14 @@ import {
   type MarginValue,
   type SizeValue
 } from '@/utils/graphObjectProperties'
+import { isGoSpotName } from '@/constants/goSpot'
 import type { BindingConfig, GraphElement } from '@/store/diagramStore'
 
 type ConverterName = string
 
 const INDENT_UNIT = '  '
+
+const SPOT_PROPERTY_KEYS = new Set(['alignment', 'locationSpot'])
 
 const isValidIdentifier = (value: string): boolean => /^[A-Za-z_$][\w$]*$/.test(value)
 
@@ -118,7 +121,10 @@ const buildPropertyObject = (element: GraphElement, level: number): string | nul
   }
 
   const lines = properties.map(({ key, value }) => {
-    const formattedValue = formatValue(value, level + 1)
+    const formattedValue =
+      SPOT_PROPERTY_KEYS.has(key) && isGoSpotName(value)
+        ? `go.Spot.${value}`
+        : formatValue(value, level + 1)
     return `${INDENT_UNIT.repeat(level + 1)}${key}: ${formattedValue}`
   })
 
