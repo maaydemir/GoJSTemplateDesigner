@@ -5,6 +5,7 @@ import DiagramCanvas from './components/DiagramCanvas'
 import InspectorPanel from './components/InspectorPanel'
 import TemplatePreview from './components/TemplatePreview'
 import CodePreviewModal from './components/CodePreviewModal'
+import NotificationCenter from './components/NotificationCenter'
 import { useDiagramStore } from './store/diagramStore'
 import { generateTemplateCode } from './utils/templateCodeGenerator'
 
@@ -139,6 +140,7 @@ const App = () => {
         <InspectorPanel />
       </main>
       <CodePreviewModal isOpen={isModalOpen} onClose={() => setModalOpen(false)} code={generatedCode} />
+      <NotificationCenter />
     </div>
   )
 }

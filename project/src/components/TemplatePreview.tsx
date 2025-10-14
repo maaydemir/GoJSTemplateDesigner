@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as go from 'gojs'
 import type { BindingConfig, GraphElement } from '@/store/diagramStore'
 import { useDiagramStore } from '@/store/diagramStore'
+import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
+import { useNotificationStore, type AddNotificationOptions } from '@/store/notificationStore'
 import {
   getRenderableProperties,
   isMarginValue,
@@ -29,24 +31,74 @@ const normaliseSize = (value: SizeValue): go.Size => {
   return new go.Size(toComponent(value.width), toComponent(value.height))
 }
 
-const buildPropertyObject = (element: GraphElement): Record<string, unknown> => {
-  const entries: [string, unknown][] = []
+interface PropertyAssignment {
+  key: string
+  rawValue: unknown
+  preparedValue: unknown
+}
+
+const buildPropertyAssignments = (element: GraphElement): PropertyAssignment[] => {
+  const entries: PropertyAssignment[] = []
 
   getRenderableProperties(element).forEach(({ key, value }) => {
     if (isMarginValue(value)) {
-      entries.push([key, normaliseMargin(value)])
+      entries.push({ key, rawValue: value, preparedValue: normaliseMargin(value) })
       return
     }
 
     if (isSizeValue(value)) {
-      entries.push([key, normaliseSize(value)])
+      entries.push({ key, rawValue: value, preparedValue: normaliseSize(value) })
       return
     }
 
-    entries.push([key, value])
+    entries.push({ key, rawValue: value, preparedValue: value })
   })
 
-  return Object.fromEntries(entries)
+  return entries
+}
+
+type NotifyFn = (message: string, options?: AddNotificationOptions) => string
+type PropertyErrorCache = Map<string, string | undefined>
+
+const serialiseValue = (value: unknown): string | undefined => {
+  try {
+    return JSON.stringify(value)
+  } catch (error) {
+    return typeof value === 'string' ? value : undefined
+  }
+}
+
+const applyPropertyAssignments = (
+  graphObject: go.GraphObject,
+  element: GraphElement,
+  assignments: PropertyAssignment[],
+  notify: NotifyFn,
+  propertyErrorCache: PropertyErrorCache
+) => {
+  const metadata = graphObjectMetadata[element.type]
+  const displayName = element.name || metadata?.defaultName || metadata?.label || element.type
+
+  assignments.forEach(({ key, preparedValue, rawValue }) => {
+    const cacheKey = `${element.id}:${key}`
+
+    try {
+      ;(graphObject as unknown as Record<string, unknown>)[key] = preparedValue
+      propertyErrorCache.delete(cacheKey)
+    } catch (error) {
+      const serialisedValue = serialiseValue(rawValue)
+      if (propertyErrorCache.get(cacheKey) === serialisedValue) {
+        return
+      }
+
+      propertyErrorCache.set(cacheKey, serialisedValue)
+      const description = error instanceof Error ? error.message : undefined
+
+      notify(`${displayName} nesnesinin ${key} özelliği yok gibi.`, {
+        variant: 'error',
+        description
+      })
+    }
+  })
 }
 
 const buildBindingArguments = (
@@ -94,13 +146,15 @@ const createGraphObject = (
   element: GraphElement,
   childrenByParent: Map<string, GraphElement[]>,
   $: typeof go.GraphObject.make,
-  converters: Record<string, (value: unknown) => unknown>
+  converters: Record<string, (value: unknown) => unknown>,
+  notify: NotifyFn,
+  propertyErrorCache: PropertyErrorCache
 ): go.GraphObject => {
   const childElements = childrenByParent.get(element.id) ?? []
   const childGraphObjects = childElements.map(child =>
-    createGraphObject(child, childrenByParent, $, converters)
+    createGraphObject(child, childrenByParent, $, converters, notify, propertyErrorCache)
   )
-  const propertyObject = buildPropertyObject(element)
+  const assignments = buildPropertyAssignments(element)
   const bindingArgs = buildBindingArguments(element.bindings, converters)
   const args: unknown[] = []
 
@@ -118,16 +172,26 @@ const createGraphObject = (
     args.push(go.Picture)
   }
 
-  if (Object.keys(propertyObject).length > 0) {
-    args.push(propertyObject)
-  }
-
   args.push(...bindingArgs)
   args.push(...childGraphObjects)
 
   const make = $ as unknown as (...factoryArgs: unknown[]) => go.GraphObject
+  try {
+    const graphObject = make(...args)
+    applyPropertyAssignments(graphObject, element, assignments, notify, propertyErrorCache)
+    return graphObject
+  } catch (error) {
+    const metadata = graphObjectMetadata[element.type]
+    const displayName = element.name || metadata?.defaultName || metadata?.label || element.type
+    const description = error instanceof Error ? error.message : undefined
 
-  return make(...args)
+    notify(`${displayName} nesnesi oluşturulurken bir hata oluştu.`, {
+      variant: 'error',
+      description
+    })
+
+    return make(go.Panel)
+  }
 }
 
 const buildSampleNodeData = (elements: GraphElement[]): go.ObjectData => {
@@ -167,6 +231,8 @@ const TemplatePreview = () => {
   const elements = useDiagramStore(state => state.elements)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const diagramRef = useRef<go.Diagram | null>(null)
+  const propertyErrorCacheRef = useRef<PropertyErrorCache>(new Map())
+  const addNotification = useNotificationStore(state => state.addNotification)
   const hasRenderableContent = useMemo(
     () => elements.some(element => element.parentId !== null),
     [elements]
@@ -203,6 +269,21 @@ const TemplatePreview = () => {
       return
     }
 
+    const propertyErrorCache = propertyErrorCacheRef.current
+    const elementById = new Map(elements.map(element => [element.id, element]))
+    propertyErrorCache.forEach((_, key) => {
+      const [elementId, propertyName] = key.split(':')
+      const element = elementById.get(elementId)
+      if (!element) {
+        propertyErrorCache.delete(key)
+        return
+      }
+
+      if (!(propertyName in element.properties)) {
+        propertyErrorCache.delete(key)
+      }
+    })
+
     const root = elements.find(element => element.parentId === null)
     const $ = go.GraphObject.make
     if (!root) {
@@ -214,7 +295,14 @@ const TemplatePreview = () => {
 
     const childrenByParent = groupChildrenByParent(elements)
     const converters: Record<string, (value: unknown) => unknown> = {}
-    const nodeTemplate = createGraphObject(root, childrenByParent, $, converters) as go.Node
+    const nodeTemplate = createGraphObject(
+      root,
+      childrenByParent,
+      $,
+      converters,
+      addNotification,
+      propertyErrorCache
+    ) as go.Node
 
     diagram.nodeTemplate = nodeTemplate
     const sampleData = buildSampleNodeData(elements)
@@ -227,7 +315,7 @@ const TemplatePreview = () => {
     } else {
       diagram.scale = 1
     }
-  }, [elements])
+  }, [elements, addNotification])
 
   return (
     <aside className='flex h-full min-h-[280px] flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/70 p-4'>
