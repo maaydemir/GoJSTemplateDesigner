@@ -217,11 +217,11 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
         name: 'padding',
         label: 'Padding',
         description: 'Internal padding applied around the panel content.',
+        defaultValue: { top: null, right: null, bottom: null, left: null },
         control: {
           type: 'margin',
           axisLabels: ['Top', 'Right', 'Bottom', 'Left']
-        },
-        advanced: true
+        }
       }
     ])
   },
