@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
+import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 
 export type GraphObjectType = 'node' | 'panel' | 'shape' | 'text' | 'picture'
 
@@ -32,16 +33,56 @@ export interface DiagramState {
   removeElement: (id: string) => void
 }
 
-const createInitialNode = (): GraphElement => ({
-  id: nanoid(),
-  type: 'node',
-  name: 'Auto Node',
-  parentId: null,
-  properties: {
-    category: 'Auto'
-  },
-  bindings: []
-})
+const cloneValue = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.map(item => cloneValue(item)) as unknown as T
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      key,
+      cloneValue(entry)
+    ])
+    return Object.fromEntries(entries) as T
+  }
+
+  return value
+}
+
+const createGraphElement = ({
+  type,
+  parentId,
+  name,
+  properties,
+  bindings
+}: {
+  type: GraphObjectType
+  parentId: string | null
+  name?: string
+  properties?: GraphElement['properties']
+  bindings?: BindingConfig[]
+}): GraphElement => {
+  const metadata = graphObjectMetadata[type]
+  const mergedProperties: GraphElement['properties'] = {
+    ...cloneValue(metadata.defaultProperties),
+    ...(properties ?? {})
+  }
+
+  return {
+    id: nanoid(),
+    type,
+    name: name ?? metadata.defaultName,
+    parentId,
+    properties: mergedProperties,
+    bindings: bindings ?? []
+  }
+}
+
+const createInitialNode = (): GraphElement =>
+  createGraphElement({
+    type: 'node',
+    parentId: null
+  })
 
 const buildChildrenIndex = (elements: GraphElement[]): Record<string, GraphElement[]> => {
   return elements.reduce<Record<string, GraphElement[]>>((acc, element) => {
@@ -62,14 +103,13 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   elements: [createInitialNode()],
   selectedId: null,
   addElement: ({ type, name, parentId, properties = {}, bindings = [] }) => {
-    const element: GraphElement = {
-      id: nanoid(),
+    const element = createGraphElement({
       type,
-      name,
       parentId,
+      name,
       properties,
       bindings
-    }
+    })
 
     set(state => ({
       elements: [...state.elements, element],

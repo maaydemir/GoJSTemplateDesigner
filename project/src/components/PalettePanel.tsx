@@ -1,12 +1,19 @@
 import type { FC } from 'react'
+import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
+import type { GraphObjectType } from '@/store/diagramStore'
 import { useDiagramStore } from '@/store/diagramStore'
 
-const paletteItems = [
-  { type: 'panel', label: 'Panel' },
-  { type: 'shape', label: 'Shape' },
-  { type: 'text', label: 'TextBlock' },
-  { type: 'picture', label: 'Picture' }
-] as const
+const paletteTypes: GraphObjectType[] = ['panel', 'shape', 'text', 'picture']
+
+const paletteItems = paletteTypes.map(type => {
+  const metadata = graphObjectMetadata[type]
+  return {
+    type,
+    label: metadata.label,
+    description: metadata.description,
+    defaultName: metadata.defaultName
+  }
+})
 
 const PalettePanel: FC = () => {
   const root = useDiagramStore(state => state.elements.find(element => element.parentId === null))
@@ -26,7 +33,7 @@ const PalettePanel: FC = () => {
             onClick={() =>
               addElement({
                 type: item.type,
-                name: `${item.label} ${Math.floor(Math.random() * 90) + 10}`,
+                name: `${item.defaultName} ${Math.floor(Math.random() * 90) + 10}`,
                 parentId: root?.id ?? null
               })
             }
@@ -36,7 +43,7 @@ const PalettePanel: FC = () => {
             ].join(' ')}
           >
             <span className='block font-medium'>{item.label}</span>
-            <span className='block text-xs text-slate-400'>Click to add under the root node</span>
+            <span className='block text-xs text-slate-400'>{item.description}</span>
           </button>
         ))}
       </div>
