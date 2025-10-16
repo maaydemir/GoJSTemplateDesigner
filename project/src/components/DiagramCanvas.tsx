@@ -2,8 +2,56 @@ import type { DragEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import * as go from 'gojs'
 import { useDiagramStore } from '@/store/diagramStore'
-import type { DiagramState, GraphElement, GraphObjectType } from '@/store/diagramStore'
+import type {
+  DiagramState,
+  GraphElement,
+  GraphObjectType,
+  HoverInteractionConfig
+} from '@/store/diagramStore'
 import { GRAPH_OBJECT_DRAG_TYPE, generateElementName, isGraphObjectType, findAcceptingParent } from '@/utils/graphElements'
+
+interface DiagramNodeHoverData {
+  hoverEnabled: boolean
+  hoverBorderColor: string | null
+  hoverBackgroundColor: string | null
+  hoverShowIndicator: boolean
+  isHovered: boolean
+}
+
+const ensureHoverDefaults = (interaction: HoverInteractionConfig): DiagramNodeHoverData => ({
+  hoverEnabled: interaction.enabled,
+  hoverBorderColor: interaction.borderColor ?? null,
+  hoverBackgroundColor: interaction.backgroundColor ?? null,
+  hoverShowIndicator: interaction.showIndicator,
+  isHovered: false
+})
+
+const updateNodeHoverState = (graphObject: go.GraphObject | null, hovered: boolean) => {
+  const node = graphObject?.part
+
+  if (!(node instanceof go.Node)) {
+    return
+  }
+
+  const diagram = node.diagram
+  const model = diagram?.model
+  const data = node.data as go.ObjectData | undefined
+
+  if (!diagram || !model || !data) {
+    return
+  }
+
+  const enabled = Boolean((data as Partial<DiagramNodeHoverData>).hoverEnabled)
+  const shouldHover = hovered && enabled
+
+  if ((data as Partial<DiagramNodeHoverData>).isHovered === shouldHover) {
+    return
+  }
+
+  diagram.startTransaction('hover-interaction')
+  model.setDataProperty(data, 'isHovered', shouldHover)
+  diagram.commitTransaction('hover-interaction')
+}
 
 const syncDiagramModel = (diagram: go.Diagram, elements: GraphElement[], selectedId: string | null) => {
   const model = diagram.model as go.TreeModel
@@ -15,6 +63,7 @@ const syncDiagramModel = (diagram: go.Diagram, elements: GraphElement[], selecte
     const data = model.findNodeDataForKey(element.id) as go.ObjectData | null
     const parent = element.parentId ?? undefined
     const isSelected = element.id === selectedId
+    const hoverConfig = ensureHoverDefaults(element.hoverInteraction)
 
     if (data) {
       if (data.name !== element.name) {
@@ -29,13 +78,29 @@ const syncDiagramModel = (diagram: go.Diagram, elements: GraphElement[], selecte
       if (data.selected !== isSelected) {
         model.setDataProperty(data, 'selected', isSelected)
       }
+      if (data.hoverEnabled !== hoverConfig.hoverEnabled) {
+        model.setDataProperty(data, 'hoverEnabled', hoverConfig.hoverEnabled)
+      }
+      if (data.hoverBorderColor !== hoverConfig.hoverBorderColor) {
+        model.setDataProperty(data, 'hoverBorderColor', hoverConfig.hoverBorderColor)
+      }
+      if (data.hoverBackgroundColor !== hoverConfig.hoverBackgroundColor) {
+        model.setDataProperty(data, 'hoverBackgroundColor', hoverConfig.hoverBackgroundColor)
+      }
+      if (data.hoverShowIndicator !== hoverConfig.hoverShowIndicator) {
+        model.setDataProperty(data, 'hoverShowIndicator', hoverConfig.hoverShowIndicator)
+      }
+      if (!hoverConfig.hoverEnabled && data.isHovered) {
+        model.setDataProperty(data, 'isHovered', false)
+      }
     } else {
       model.addNodeData({
         key: element.id,
         name: element.name,
         type: element.type,
         parent,
-        selected: isSelected
+        selected: isSelected,
+        ...hoverConfig
       })
     }
   })
@@ -96,46 +161,83 @@ const DiagramCanvas = () => {
       'Auto',
       {
         selectionAdorned: false,
-        cursor: 'pointer'
+        cursor: 'pointer',
+        mouseEnter: (_event, node) => updateNodeHoverState(node, true),
+        mouseLeave: (_event, node) => updateNodeHoverState(node, false)
       },
       new go.Binding('isSelected', 'selected'),
       $(
         go.Shape,
         'RoundedRectangle',
         {
+          name: 'CARD_BACKGROUND',
           fill: '#334155',
           stroke: '#475569',
           strokeWidth: 1.5
         },
-        new go.Binding('fill', 'selected', selected => (selected ? '#1e293b' : '#334155')),
-        new go.Binding('stroke', 'selected', selected => (selected ? '#38bdf8' : '#475569')),
-        new go.Binding('strokeWidth', 'selected', selected => (selected ? 2.4 : 1.5))
+        new go.Binding('fill', '', data => {
+          if (data.isHovered && data.hoverEnabled && data.hoverBackgroundColor) {
+            return data.hoverBackgroundColor
+          }
+          return data.selected ? '#1e293b' : '#334155'
+        }),
+        new go.Binding('stroke', '', data => {
+          if (data.isHovered && data.hoverEnabled && data.hoverBorderColor) {
+            return data.hoverBorderColor
+          }
+          return data.selected ? '#38bdf8' : '#475569'
+        }),
+        new go.Binding('strokeWidth', '', data => {
+          if (data.isHovered && data.hoverEnabled && data.hoverBorderColor) {
+            return 2.6
+          }
+          return data.selected ? 2.4 : 1.5
+        })
       ),
       $(
         go.Panel,
-        'Table',
+        'Spot',
         { padding: 8 },
         $(
-          go.TextBlock,
-          {
-            row: 0,
-            column: 0,
-            maxSize: new go.Size(140, NaN),
-            stroke: 'white',
-            font: 'bold 12px Inter, sans-serif'
-          },
-          new go.Binding('text', 'name')
+          go.Panel,
+          'Table',
+          $(
+            go.TextBlock,
+            {
+              row: 0,
+              column: 0,
+              maxSize: new go.Size(140, NaN),
+              stroke: 'white',
+              font: 'bold 12px Inter, sans-serif'
+            },
+            new go.Binding('text', 'name')
+          ),
+          $(
+            go.TextBlock,
+            {
+              row: 1,
+              column: 0,
+              margin: new go.Margin(4, 0, 0, 0),
+              stroke: '#94a3b8',
+              font: '10px Inter, sans-serif'
+            },
+            new go.Binding('text', 'type', type => type.toUpperCase())
+          )
         ),
         $(
-          go.TextBlock,
+          go.Shape,
+          'Circle',
           {
-            row: 1,
-            column: 0,
-            margin: new go.Margin(4, 0, 0, 0),
-            stroke: '#94a3b8',
-            font: '10px Inter, sans-serif'
+            alignment: go.Spot.TopRight,
+            alignmentFocus: go.Spot.TopRight,
+            stroke: null,
+            fill: '#38bdf8',
+            desiredSize: new go.Size(10, 10),
+            visible: false
           },
-          new go.Binding('text', 'type', type => type.toUpperCase())
+          new go.Binding('visible', '', data =>
+            Boolean(data.hoverEnabled && data.hoverShowIndicator && data.isHovered)
+          )
         )
       )
     )

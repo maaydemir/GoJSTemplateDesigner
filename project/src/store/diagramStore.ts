@@ -14,6 +14,13 @@ export interface BindingConfig {
 
 export type BindingInput = Omit<BindingConfig, 'id'>
 
+export interface HoverInteractionConfig {
+  enabled: boolean
+  borderColor: string | null
+  backgroundColor: string | null
+  showIndicator: boolean
+}
+
 export interface GraphElement {
   id: string
   type: GraphObjectType
@@ -21,6 +28,7 @@ export interface GraphElement {
   parentId: string | null
   properties: Record<string, unknown>
   bindings: BindingConfig[]
+  hoverInteraction: HoverInteractionConfig
 }
 
 interface DiagramSnapshot {
@@ -38,9 +46,10 @@ export interface DiagramState {
   selectedId: string | null
   canUndo: boolean
   canRedo: boolean
-  addElement: (element: Omit<GraphElement, 'id' | 'bindings' | 'properties'> & {
+  addElement: (element: Omit<GraphElement, 'id' | 'bindings' | 'properties' | 'hoverInteraction'> & {
     properties?: GraphElement['properties']
     bindings?: BindingConfig[]
+    hoverInteraction?: Partial<HoverInteractionConfig>
   }) => void
   updateElement: (id: string, updater: (element: GraphElement) => GraphElement) => void
   selectElement: (id: string | null) => void
@@ -54,9 +63,37 @@ export interface DiagramState {
     updater: (binding: BindingConfig) => BindingConfig
   ) => void
   removeBinding: (elementId: string, bindingId: string) => void
+  updateHoverInteraction: (
+    elementId: string,
+    updater: (interaction: HoverInteractionConfig) => HoverInteractionConfig
+  ) => void
   undo: () => void
   redo: () => void
   history: DiagramHistoryState
+}
+
+export const HOVER_INTERACTION_DEFAULTS: HoverInteractionConfig = {
+  enabled: false,
+  borderColor: '#38bdf8',
+  backgroundColor: '#1e293b',
+  showIndicator: false
+}
+
+const createHoverInteraction = (overrides?: Partial<HoverInteractionConfig>): HoverInteractionConfig => ({
+  ...HOVER_INTERACTION_DEFAULTS,
+  ...overrides
+})
+
+const areHoverInteractionsEqual = (
+  left: HoverInteractionConfig,
+  right: HoverInteractionConfig
+): boolean => {
+  return (
+    left.enabled === right.enabled &&
+    left.borderColor === right.borderColor &&
+    left.backgroundColor === right.backgroundColor &&
+    left.showIndicator === right.showIndicator
+  )
 }
 
 const cloneValue = <T>(value: T): T => {
@@ -78,7 +115,8 @@ const cloneValue = <T>(value: T): T => {
 const cloneElement = (element: GraphElement): GraphElement => ({
   ...element,
   properties: cloneValue(element.properties),
-  bindings: element.bindings.map(binding => ({ ...binding }))
+  bindings: element.bindings.map(binding => ({ ...binding })),
+  hoverInteraction: { ...element.hoverInteraction }
 })
 
 const createSnapshot = (state: DiagramState): DiagramSnapshot => ({
@@ -96,13 +134,15 @@ const createGraphElement = ({
   parentId,
   name,
   properties,
-  bindings
+  bindings,
+  hoverInteraction
 }: {
   type: GraphObjectType
   parentId: string | null
   name?: string
   properties?: GraphElement['properties']
   bindings?: BindingConfig[]
+  hoverInteraction?: Partial<HoverInteractionConfig>
 }): GraphElement => {
   const metadata = graphObjectMetadata[type]
   const mergedProperties: GraphElement['properties'] = {
@@ -116,7 +156,8 @@ const createGraphElement = ({
     name: name ?? metadata.defaultName,
     parentId,
     properties: mergedProperties,
-    bindings: bindings ? bindings.map(binding => ({ ...binding })) : []
+    bindings: bindings ? bindings.map(binding => ({ ...binding })) : [],
+    hoverInteraction: createHoverInteraction(hoverInteraction)
   }
 }
 
@@ -150,13 +191,21 @@ export const useDiagramStore = create<DiagramState>((set) => ({
     past: [],
     future: []
   },
-  addElement: ({ type, name, parentId, properties = {}, bindings = [] }) => {
+  addElement: ({
+    type,
+    name,
+    parentId,
+    properties = {},
+    bindings = [],
+    hoverInteraction
+  }) => {
     const element = createGraphElement({
       type,
       parentId,
       name,
       properties,
-      bindings
+      bindings,
+      hoverInteraction
     })
 
     set(state => {
@@ -281,6 +330,38 @@ export const useDiagramStore = create<DiagramState>((set) => ({
         didUpdate = true
         const { [property]: _removed, ...rest } = element.properties
         return { ...element, properties: rest }
+      })
+
+      if (!didUpdate) {
+        return {}
+      }
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  updateHoverInteraction: (elementId, updater) => {
+    set(state => {
+      let didUpdate = false
+      const elements = state.elements.map(element => {
+        if (element.id !== elementId) {
+          return element
+        }
+
+        const next = updater({ ...element.hoverInteraction })
+        if (areHoverInteractionsEqual(next, element.hoverInteraction)) {
+          return element
+        }
+
+        didUpdate = true
+        return { ...element, hoverInteraction: { ...next } }
       })
 
       if (!didUpdate) {

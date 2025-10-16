@@ -1,8 +1,8 @@
 import { ChangeEvent, useEffect, useState } from 'react'
 import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 import type { GraphObjectPropertyDescriptor, SelectOption } from '@/metadata/graphObjectMetadata'
-import type { GraphElement } from '@/store/diagramStore'
-import { useDiagramStore } from '@/store/diagramStore'
+import type { GraphElement, HoverInteractionConfig } from '@/store/diagramStore'
+import { HOVER_INTERACTION_DEFAULTS, useDiagramStore } from '@/store/diagramStore'
 
 type MarginValue = {
   top: number | null
@@ -332,6 +332,128 @@ const ImagePropertyControl = ({ value, placeholder, accept, onChange, onClear }:
         <p className='text-xs text-rose-300'>The preview could not be rendered. Check the image source.</p>
       )}
     </div>
+  )
+}
+
+const HoverInteractionSection = ({ element }: { element: GraphElement }) => {
+  const updateHoverInteraction = useDiagramStore(state => state.updateHoverInteraction)
+  const interaction = element.hoverInteraction ?? HOVER_INTERACTION_DEFAULTS
+  const isEnabled = interaction.enabled
+
+  const applyPatch = (patch: Partial<HoverInteractionConfig>) => {
+    updateHoverInteraction(element.id, current => ({ ...current, ...patch }))
+  }
+
+  const handleEnabledChange = (enabled: boolean) => {
+    updateHoverInteraction(element.id, current => ({
+      ...current,
+      enabled,
+      borderColor: enabled
+        ? current.borderColor ?? HOVER_INTERACTION_DEFAULTS.borderColor
+        : current.borderColor,
+      backgroundColor: enabled
+        ? current.backgroundColor ?? HOVER_INTERACTION_DEFAULTS.backgroundColor
+        : current.backgroundColor
+    }))
+  }
+
+  const handleReset = () => {
+    updateHoverInteraction(element.id, () => ({ ...HOVER_INTERACTION_DEFAULTS }))
+  }
+
+  const fallbackBorderColor = HOVER_INTERACTION_DEFAULTS.borderColor ?? '#38bdf8'
+  const borderColorValue = interaction.borderColor ?? fallbackBorderColor
+
+  const fallbackBackground = HOVER_INTERACTION_DEFAULTS.backgroundColor ?? '#1e293b'
+  const backgroundColorValue = interaction.backgroundColor ?? fallbackBackground
+
+  return (
+    <section className='space-y-4 rounded-md border border-slate-800 bg-slate-900/60 p-4'>
+      <div className='flex items-start justify-between gap-2'>
+        <div className='flex flex-col gap-1 text-xs uppercase tracking-wide text-slate-400'>
+          <span>Hover interaction</span>
+          <span className='text-[11px] normal-case text-slate-500'>
+            Customise how this element reacts when the pointer hovers over it.
+          </span>
+        </div>
+        <button
+          type='button'
+          onClick={handleReset}
+          className='text-[11px] font-medium uppercase tracking-wide text-slate-500 transition hover:text-slate-300'
+        >
+          Reset
+        </button>
+      </div>
+
+      <label className='flex items-center gap-2 text-sm text-slate-200'>
+        <input
+          type='checkbox'
+          checked={isEnabled}
+          onChange={event => handleEnabledChange(event.target.checked)}
+          className='h-4 w-4 rounded border border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500'
+        />
+        <span>Enable hover highlight</span>
+      </label>
+
+      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+        <div className='space-y-2'>
+          <label className='flex flex-col gap-1 text-xs uppercase tracking-wide text-slate-400'>
+            <span>Border colour</span>
+            <input
+              type='color'
+              value={borderColorValue}
+              disabled={!isEnabled}
+              onChange={event => applyPatch({ borderColor: event.target.value })}
+              className='h-10 w-full cursor-pointer rounded-md border border-slate-700 bg-slate-900 text-sm outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-60'
+            />
+          </label>
+          <button
+            type='button'
+            disabled={!isEnabled}
+            onClick={() => applyPatch({ borderColor: HOVER_INTERACTION_DEFAULTS.borderColor })}
+            className='text-[11px] font-medium uppercase tracking-wide text-slate-500 transition hover:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50'
+          >
+            Use default border
+          </button>
+        </div>
+
+        <div className='space-y-2'>
+          <label className='flex flex-col gap-1 text-xs uppercase tracking-wide text-slate-400'>
+            <span>Background</span>
+            <input
+              type='color'
+              value={backgroundColorValue}
+              disabled={!isEnabled}
+              onChange={event => applyPatch({ backgroundColor: event.target.value })}
+              className='h-10 w-full cursor-pointer rounded-md border border-slate-700 bg-slate-900 text-sm outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-60'
+            />
+          </label>
+          <button
+            type='button'
+            disabled={!isEnabled}
+            onClick={() => applyPatch({ backgroundColor: HOVER_INTERACTION_DEFAULTS.backgroundColor })}
+            className='text-[11px] font-medium uppercase tracking-wide text-slate-500 transition hover:text-slate-300 disabled:cursor-not-allowed disabled:opacity-50'
+          >
+            Use default background
+          </button>
+        </div>
+      </div>
+
+      <label className='flex items-center gap-2 text-sm text-slate-200'>
+        <input
+          type='checkbox'
+          checked={Boolean(interaction.showIndicator)}
+          disabled={!isEnabled}
+          onChange={event => applyPatch({ showIndicator: event.target.checked })}
+          className='h-4 w-4 rounded border border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60'
+        />
+        <span>Show indicator dot while hovered</span>
+      </label>
+
+      {!isEnabled && (
+        <p className='text-[11px] text-slate-500'>Enable the hover highlight to customise colours or toggle the indicator.</p>
+      )}
+    </section>
   )
 }
 
@@ -674,6 +796,8 @@ const PropertyEditor = ({ element }: PropertyEditorProps) => {
           </div>
         )}
       </div>
+
+      <HoverInteractionSection element={element} />
 
       <div className='space-y-3'>
         <header className='flex items-center justify-between'>
