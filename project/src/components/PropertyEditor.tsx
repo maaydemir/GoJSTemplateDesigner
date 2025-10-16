@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { ChangeEvent, useEffect, useState } from 'react'
 import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 import type { GraphObjectPropertyDescriptor, SelectOption } from '@/metadata/graphObjectMetadata'
 import type { GraphElement } from '@/store/diagramStore'
@@ -99,6 +99,242 @@ const isMarginValue = (value: unknown): value is MarginValue => {
 const defaultMarginValue = (): MarginValue => ({ top: null, right: null, bottom: null, left: null })
 const defaultSizeValue = (): SizeValue => ({ width: null, height: null })
 
+const DEFAULT_IMAGE_ACCEPT = [
+  'image/png',
+  'image/webp',
+  'image/svg+xml',
+  '.png',
+  '.webp',
+  '.svg'
+]
+
+const ACCEPTED_IMAGE_LABEL = 'PNG, WebP or SVG'
+
+const formatFileSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return '0 B'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = bytes
+  let index = 0
+
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index += 1
+  }
+
+  const precision = index === 0 ? 0 : 1
+  return `${size.toFixed(precision)} ${units[index]}`
+}
+
+const readFileAsDataURL = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.addEventListener('error', () => {
+      reject(reader.error ?? new Error('Failed to read file'))
+    })
+
+    reader.addEventListener('abort', () => {
+      reject(new Error('File reading aborted'))
+    })
+
+    reader.addEventListener('load', () => {
+      const result = reader.result
+      if (typeof result === 'string') {
+        resolve(result)
+        return
+      }
+
+      reject(new Error('Unsupported file reader result'))
+    })
+
+    reader.readAsDataURL(file)
+  })
+}
+
+const matchesAcceptValue = (file: File, acceptValue: string): boolean => {
+  const normalized = acceptValue.trim().toLowerCase()
+  if (!normalized) {
+    return false
+  }
+
+  const fileName = file.name.toLowerCase()
+  const fileType = file.type.toLowerCase()
+
+  if (normalized.startsWith('.')) {
+    return fileName.endsWith(normalized)
+  }
+
+  if (normalized.endsWith('/*')) {
+    const prefix = normalized.slice(0, -1)
+    return fileType.startsWith(prefix)
+  }
+
+  return fileType === normalized
+}
+
+const isAcceptedImageFile = (file: File, acceptList: string[]): boolean => {
+  if (acceptList.length === 0) {
+    return true
+  }
+
+  return acceptList.some(value => matchesAcceptValue(file, value))
+}
+
+interface ImagePropertyControlProps {
+  value: unknown
+  placeholder?: string
+  accept?: string[]
+  onChange: (nextValue: string) => void
+  onClear: () => void
+}
+
+const ImagePropertyControl = ({ value, placeholder, accept, onChange, onClear }: ImagePropertyControlProps) => {
+  const [status, setStatus] = useState<{ type: 'info' | 'error'; message: string } | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const stringValue = typeof value === 'string' ? value : ''
+  const resolvedAccept = accept && accept.length > 0 ? accept : DEFAULT_IMAGE_ACCEPT
+  const acceptAttribute = resolvedAccept.join(',')
+  const hasImage = stringValue.trim().length > 0
+
+  useEffect(() => {
+    setPreviewError(null)
+  }, [stringValue])
+
+  useEffect(() => {
+    if (!hasImage) {
+      setStatus(null)
+    }
+  }, [hasImage])
+
+  const handleTextChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setStatus(null)
+    setPreviewError(null)
+    onChange(event.target.value)
+  }
+
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.target
+    const file = input.files?.[0] ?? null
+    input.value = ''
+
+    if (!file) {
+      return
+    }
+
+    if (!isAcceptedImageFile(file, resolvedAccept)) {
+      setStatus({
+        type: 'error',
+        message: `Unsupported file type. Please choose a ${ACCEPTED_IMAGE_LABEL} image.`
+      })
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const dataUrl = await readFileAsDataURL(file)
+      onChange(dataUrl)
+      setStatus({
+        type: 'info',
+        message: `Loaded ${file.name} (${formatFileSize(file.size)}) as a data URL.`
+      })
+      setPreviewError(null)
+    } catch (error) {
+      setStatus({
+        type: 'error',
+        message: 'Unable to read the selected file. Please try another image.'
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleClear = () => {
+    onClear()
+    setStatus(null)
+    setPreviewError(null)
+  }
+
+  return (
+    <div className='space-y-3'>
+      <input
+        type='text'
+        value={stringValue}
+        placeholder={placeholder}
+        onChange={handleTextChange}
+        className='w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-slate-400 focus:ring-1 focus:ring-slate-400'
+      />
+      <div className='flex flex-wrap items-center gap-2 text-[11px] text-slate-500'>
+        <label
+          className={[
+            'inline-flex cursor-pointer items-center rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 transition',
+            isLoading ? 'opacity-60' : 'hover:border-slate-500 hover:bg-slate-700'
+          ].join(' ')}
+        >
+          <input
+            type='file'
+            accept={acceptAttribute}
+            disabled={isLoading}
+            onChange={handleFileChange}
+            className='sr-only'
+          />
+          {isLoading ? 'Processing…' : 'Upload image'}
+        </label>
+        {hasImage && (
+          <button
+            type='button'
+            onClick={handleClear}
+            className='text-xs font-medium text-red-300 transition hover:text-red-200'
+          >
+            Clear
+          </button>
+        )}
+        <span className='text-[11px] text-slate-500'>
+          Supports {ACCEPTED_IMAGE_LABEL} files. Values are stored as inline data URIs.
+        </span>
+      </div>
+      <div className='relative flex h-32 items-center justify-center overflow-hidden rounded-md border border-slate-800 bg-slate-950/80'>
+        {hasImage ? (
+          <>
+            <img
+              src={stringValue}
+              alt='Selected image preview'
+              className='max-h-full max-w-full object-contain'
+              onError={() => setPreviewError('Unable to render the current image source.')}
+              onLoad={() => setPreviewError(null)}
+            />
+            {previewError && (
+              <div className='absolute inset-0 flex items-center justify-center bg-rose-950/60 px-4 text-center text-xs text-rose-100'>
+                {previewError}
+              </div>
+            )}
+            {isLoading && (
+              <div className='absolute inset-0 flex items-center justify-center bg-slate-950/80 text-xs text-slate-300'>
+                Converting image…
+              </div>
+            )}
+          </>
+        ) : (
+          <p className='max-w-[220px] px-4 text-center text-xs text-slate-500'>
+            Paste an image URL or upload a PNG, WebP or SVG file to preview it here.
+          </p>
+        )}
+      </div>
+      {status && (
+        <p className={['text-xs', status.type === 'error' ? 'text-rose-300' : 'text-emerald-300'].join(' ')}>
+          {status.message}
+        </p>
+      )}
+      {previewError && (
+        <p className='text-xs text-rose-300'>The preview could not be rendered. Check the image source.</p>
+      )}
+    </div>
+  )
+}
+
 const PropertyControl = ({
   descriptor,
   element,
@@ -127,6 +363,18 @@ const PropertyControl = ({
         placeholder={control.placeholder}
         onChange={event => handlePrimitiveChange(event.target.value)}
         className='w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-slate-400 focus:ring-1 focus:ring-slate-400'
+      />
+    )
+  }
+
+  if (control.type === 'image') {
+    return (
+      <ImagePropertyControl
+        value={value}
+        placeholder={control.placeholder}
+        accept={control.accept}
+        onChange={nextValue => handlePrimitiveChange(nextValue)}
+        onClear={() => handlePrimitiveChange('')}
       />
     )
   }
