@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import * as go from 'gojs'
-import type { BindingConfig, GraphElement } from '@/store/diagramStore'
-import { useDiagramStore } from '@/store/diagramStore'
+import type { BindingConfig, GraphElement, HoverInteractionConfig } from '@/store/diagramStore'
+import { HOVER_INTERACTION_DEFAULTS, useDiagramStore } from '@/store/diagramStore'
 import { graphObjectMetadata } from '@/metadata/graphObjectMetadata'
 import { useNotificationStore, type AddNotificationOptions } from '@/store/notificationStore'
 import {
@@ -33,6 +33,7 @@ const normaliseSize = (value: SizeValue): go.Size => {
 }
 
 const SPOT_PROPERTY_KEYS = new Set(['alignment', 'locationSpot'])
+const PREVIEW_HOVER_ADORNMENT_KEY = 'hover-preview-highlight'
 
 const toGoSpot = (value: GoSpotName): go.Spot | null => {
   const record = go.Spot as unknown as Record<string, go.Spot | undefined>
@@ -140,6 +141,105 @@ const buildBindingArguments = (
   })
 }
 
+const resolveHoverInteraction = (
+  interaction: HoverInteractionConfig | undefined
+): HoverInteractionConfig => ({
+  ...HOVER_INTERACTION_DEFAULTS,
+  ...(interaction ?? {})
+})
+
+const createHoverHighlightAdornment = (
+  $: typeof go.GraphObject.make,
+  interaction: HoverInteractionConfig
+): go.Adornment => {
+  const borderColor = interaction.borderColor ?? null
+  const backgroundColor = interaction.backgroundColor ?? null
+  const strokeWidth = borderColor ? 2.4 : 0
+  const indicatorFill = borderColor ?? HOVER_INTERACTION_DEFAULTS.borderColor ?? '#38bdf8'
+
+  return $(
+    go.Adornment,
+    'Spot',
+    { isActionable: false },
+    $(
+      go.Panel,
+      'Auto',
+      $(
+        go.Shape,
+        'Rectangle',
+        {
+          stroke: borderColor ?? 'transparent',
+          strokeWidth,
+          fill: backgroundColor ?? 'transparent',
+          name: 'HOVER_HIGHLIGHT_SHAPE',
+          isActionable: false
+        }
+      ),
+      $(go.Placeholder, {
+        padding: strokeWidth > 0 ? 4 : 2,
+        isActionable: false,
+        isHitTestable: false
+      })
+    ),
+    $(
+      go.Shape,
+      'Circle',
+      {
+        alignment: go.Spot.TopRight,
+        alignmentFocus: go.Spot.TopRight,
+        desiredSize: new go.Size(10, 10),
+        stroke: null,
+        fill: indicatorFill,
+        visible: Boolean(interaction.showIndicator),
+        isHitTestable: false
+      }
+    )
+  )
+}
+
+const applyNodeHoverInteraction = (
+  node: go.Node,
+  interaction: HoverInteractionConfig,
+  $: typeof go.GraphObject.make
+) => {
+  if (!interaction.enabled) {
+    return
+  }
+
+  const previousMouseEnter = node.mouseEnter
+  const previousMouseLeave = node.mouseLeave
+
+  node.mouseEnter = (event, obj, prevObj) => {
+    if (typeof previousMouseEnter === 'function') {
+      previousMouseEnter(event, obj, prevObj)
+    }
+
+    const part = obj.part
+    if (!(part instanceof go.Node)) {
+      return
+    }
+
+    if (!part.findAdornment(PREVIEW_HOVER_ADORNMENT_KEY)) {
+      const adornment = createHoverHighlightAdornment($, interaction)
+      adornment.category = PREVIEW_HOVER_ADORNMENT_KEY
+      part.addAdornment(PREVIEW_HOVER_ADORNMENT_KEY, adornment)
+    }
+  }
+
+  node.mouseLeave = (event, obj, nextObj) => {
+    if (typeof previousMouseLeave === 'function') {
+      previousMouseLeave(event, obj, nextObj)
+    }
+
+    const part = obj.part
+    if (!(part instanceof go.Node)) {
+      return
+    }
+
+    part.removeAdornment(PREVIEW_HOVER_ADORNMENT_KEY)
+  }
+}
+
 const groupChildrenByParent = (elements: GraphElement[]): Map<string, GraphElement[]> => {
   const map = new Map<string, GraphElement[]>()
 
@@ -195,6 +295,12 @@ const createGraphObject = (
   try {
     const graphObject = make(...args)
     applyPropertyAssignments(graphObject, element, assignments, notify, propertyErrorCache)
+
+    if (element.type === 'node' && graphObject instanceof go.Node) {
+      const interaction = resolveHoverInteraction(element.hoverInteraction)
+      applyNodeHoverInteraction(graphObject, interaction, $)
+    }
+
     return graphObject
   } catch (error) {
     const metadata = graphObjectMetadata[element.type]
@@ -321,6 +427,7 @@ const TemplatePreview = () => {
     ) as go.Node
 
     diagram.nodeTemplate = nodeTemplate
+    diagram.clearHighlighteds()
     const sampleData = buildSampleNodeData(elements)
     diagram.model = new go.GraphLinksModel({
       nodeDataArray: [{ key: 'preview-node', ...sampleData }]
