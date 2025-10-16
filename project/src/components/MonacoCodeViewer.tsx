@@ -8,13 +8,9 @@ import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution'
 import 'monaco-editor/esm/vs/language/typescript/monaco.contribution'
 
-interface MonacoEnvironment {
-  getWorker: (_: string, label: string) => Worker
-}
-
 declare global {
   interface Window {
-    MonacoEnvironment?: MonacoEnvironment
+    MonacoEnvironment?: monaco.Environment
   }
 }
 

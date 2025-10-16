@@ -9,6 +9,7 @@ export type PropertyControlType =
   | 'select'
   | 'size'
   | 'margin'
+  | 'image'
 
 export interface SelectOption {
   label: string
@@ -29,6 +30,8 @@ export interface PropertyControlConfig {
   options?: SelectOption[]
   /** Labels used by vector-like controls such as size or margin. */
   axisLabels?: string[]
+  /** Accepted MIME types or extensions for file-based controls such as image uploads. */
+  accept?: string[]
 }
 
 export interface GraphObjectPropertyDescriptor {
@@ -354,10 +357,11 @@ export const graphObjectMetadata: GraphObjectMetadataMap = {
       {
         name: 'source',
         label: 'Image Source',
-        description: 'Accepts an image URL or base64 encoded data URI.',
+        description: 'Accepts an image URL, base64 data URI or uploaded PNG, WebP and SVG files.',
         control: {
-          type: 'text',
-          placeholder: 'https://example.com/image.png'
+          type: 'image',
+          placeholder: 'Paste an image URL or upload a file',
+          accept: ['image/png', 'image/webp', 'image/svg+xml', '.png', '.webp', '.svg']
         }
       },
       {
