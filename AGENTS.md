@@ -20,43 +20,34 @@ and code generator for converting a JSON description into GoJS code.
 Setup and Build Commands
 
 Agents should run all commands from the repository root unless
-otherwise specified.
+otherwise specified. The app is a Vite + React single‑page
+application under the project/ directory.
 
-Install dependencies: the TypeScript sources and demo depend on
-several NPM packages. Install them by running:
+Install dependencies by running:
 
 cd project
 npm install
 
 
-Build the TypeScript sources (optional for the designer):
+Run the visual designer locally:
+
+npm run dev -- --host
+
+
+This starts the Vite dev server (default port 5173) so you can
+try the live designer in the browser.
+
+Create a production build (used for Vercel/static hosting):
 
 npm run build
 
 
-This compiles the DSL (src/dsl.ts), code generator (src/codegen.ts)
-and demo (src/demo.ts) into CommonJS files under dist/. It is
-only necessary if you intend to run npm start or use the DSL in
-other scripts.
+Preview the production build locally (mirrors Vercel output):
 
-Run the demo (optional):
-
-npm start
+npm run preview -- --host --port 4173
 
 
-The demo prints a sample generated template to the console. It is
-useful for verifying that the code generator is working.
-
-Open the visual designer: no build step is required. Open
-project/designer/index.html directly in your browser. The page
-loads the GoJS library, palette definitions and the preloaded
-template JSON and should work on file:// URLs. A local web
-server is not required, but if you prefer you may run
-
-npx http-server project/designer
-
-
-then navigate to http://localhost:8080/index.html in your browser.
+This serves the contents of dist/ at http://localhost:4173.
 
 Code Style and Conventions
 
