@@ -1,4 +1,4 @@
-import type { DragEvent } from 'react'
+import type { DragEvent, MouseEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import * as go from 'gojs'
 import { useDiagramStore } from '@/store/diagramStore'
@@ -9,6 +9,7 @@ import type {
   HoverInteractionConfig
 } from '@/store/diagramStore'
 import { GRAPH_OBJECT_DRAG_TYPE, generateElementName, isGraphObjectType, findAcceptingParent } from '@/utils/graphElements'
+import { useUIStore } from '@/store/uiStore'
 
 interface DiagramNodeHoverData {
   hoverEnabled: boolean
@@ -139,6 +140,19 @@ const DiagramCanvas = () => {
     const { elements } = useDiagramStore.getState()
     return elements.some(element => element.parentId !== null)
   })
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    targetId: string
+    canMoveForward: boolean
+    canMoveBackward: boolean
+  } | null>(null)
+  const setInspectorTab = useUIStore(state => state.setInspectorTab)
+  const bringElementForward = useDiagramStore(state => state.bringElementForward)
+  const sendElementBackward = useDiagramStore(state => state.sendElementBackward)
+  const duplicateElement = useDiagramStore(state => state.duplicateElement)
+  const removeElement = useDiagramStore(state => state.removeElement)
+  const selectElement = useDiagramStore(state => state.selectElement)
 
   useEffect(() => {
     if (!containerRef.current || diagramRef.current) {
@@ -282,6 +296,24 @@ const DiagramCanvas = () => {
     }
   }, [])
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null)
+      }
+    }
+
+    const handleClick = () => setContextMenu(null)
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('click', handleClick)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('click', handleClick)
+    }
+  }, [])
+
   const isPaletteDrag = (event: DragEvent<HTMLDivElement>) =>
     event.dataTransfer.types.includes(GRAPH_OBJECT_DRAG_TYPE)
 
@@ -331,6 +363,78 @@ const DiagramCanvas = () => {
     })
   }
 
+  const computeSiblingMovement = (targetId: string) => {
+    const { elements } = useDiagramStore.getState()
+    const index = elements.findIndex(element => element.id === targetId)
+    if (index === -1) {
+      return { canMoveForward: false, canMoveBackward: false }
+    }
+
+    const parentId = elements[index].parentId
+    const canMoveBackward = elements.some((element, currentIndex) => currentIndex < index && element.parentId === parentId)
+    const canMoveForward = elements.some((element, currentIndex) => currentIndex > index && element.parentId === parentId)
+
+    return { canMoveForward, canMoveBackward }
+  }
+
+  const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+
+    const diagram = diagramRef.current
+    const container = containerRef.current
+
+    if (!diagram || !container) {
+      return
+    }
+
+    const rect = container.getBoundingClientRect()
+    const viewPoint = new go.Point(event.clientX - rect.left, event.clientY - rect.top)
+    const documentPoint = diagram.transformViewToDoc(viewPoint)
+    const part = diagram.findPartAt(documentPoint, true)
+    const targetId = (part?.data?.key as string | undefined) ?? null
+
+    if (!targetId) {
+      setContextMenu(null)
+      return
+    }
+
+    selectElement(targetId)
+    const siblingState = computeSiblingMovement(targetId)
+
+    setContextMenu({
+      x: viewPoint.x,
+      y: viewPoint.y,
+      targetId,
+      ...siblingState
+    })
+  }
+
+  const handleProperties = (targetId: string) => {
+    selectElement(targetId)
+    setInspectorTab('properties')
+    setContextMenu(null)
+  }
+
+  const handleDuplicate = (targetId: string) => {
+    duplicateElement(targetId)
+    setContextMenu(null)
+  }
+
+  const handleRemove = (targetId: string) => {
+    removeElement(targetId)
+    setContextMenu(null)
+  }
+
+  const handleBringForward = (targetId: string) => {
+    bringElementForward(targetId)
+    setContextMenu(null)
+  }
+
+  const handleSendBackward = (targetId: string) => {
+    sendElementBackward(targetId)
+    setContextMenu(null)
+  }
+
   const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
     if (!isPaletteDrag(event)) {
       return
@@ -361,7 +465,7 @@ const DiagramCanvas = () => {
     .join(' ')
 
   return (
-    <div className='relative h-full w-full'>
+    <div className='relative h-full w-full' onContextMenu={handleContextMenu}>
       <div
         ref={containerRef}
         className={canvasClasses}
@@ -392,6 +496,57 @@ const DiagramCanvas = () => {
           <p className='max-w-[260px] text-xs text-emerald-100/80'>
             Drop the element over a compatible parent to automatically nest it.
           </p>
+        </div>
+      )}
+      {contextMenu && (
+        <div
+          className='absolute z-20 w-56 rounded-md border border-slate-700 bg-slate-800/95 p-1 shadow-xl backdrop-blur'
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={event => event.stopPropagation()}
+        >
+          <button
+            type='button'
+            className='flex w-full items-center justify-between rounded px-3 py-2 text-sm text-slate-100 transition hover:bg-slate-700'
+            onClick={() => handleProperties(contextMenu.targetId)}
+          >
+            Özellikler
+            <span className='text-xs text-slate-400'>⌘.</span>
+          </button>
+          <button
+            type='button'
+            className='flex w-full items-center justify-between rounded px-3 py-2 text-sm text-slate-100 transition hover:bg-slate-700'
+            onClick={() => handleDuplicate(contextMenu.targetId)}
+          >
+            Çoğalt
+            <span className='text-xs text-slate-400'>⌘D</span>
+          </button>
+          <button
+            type='button'
+            className='flex w-full items-center justify-between rounded px-3 py-2 text-sm text-slate-100 transition hover:bg-slate-700'
+            onClick={() => handleRemove(contextMenu.targetId)}
+          >
+            Sil
+            <span className='text-xs text-slate-400'>⌫</span>
+          </button>
+          <div className='my-1 h-px bg-slate-700' />
+          <button
+            type='button'
+            disabled={!contextMenu.canMoveForward}
+            className='flex w-full items-center justify-between rounded px-3 py-2 text-sm text-slate-100 transition disabled:cursor-not-allowed disabled:opacity-50 hover:enabled:bg-slate-700'
+            onClick={() => handleBringForward(contextMenu.targetId)}
+          >
+            Öne Getir
+            <span className='text-xs text-slate-400'>⌘↑</span>
+          </button>
+          <button
+            type='button'
+            disabled={!contextMenu.canMoveBackward}
+            className='flex w-full items-center justify-between rounded px-3 py-2 text-sm text-slate-100 transition disabled:cursor-not-allowed disabled:opacity-50 hover:enabled:bg-slate-700'
+            onClick={() => handleSendBackward(contextMenu.targetId)}
+          >
+            Arkaya Götür
+            <span className='text-xs text-slate-400'>⌘↓</span>
+          </button>
         </div>
       )}
     </div>

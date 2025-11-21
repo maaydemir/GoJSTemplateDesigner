@@ -56,6 +56,9 @@ export interface DiagramState {
   removeElement: (id: string) => void
   setProperty: (id: string, property: string, value: unknown) => void
   removeProperty: (id: string, property: string) => void
+  duplicateElement: (id: string) => void
+  bringElementForward: (id: string) => void
+  sendElementBackward: (id: string) => void
   addBinding: (elementId: string, binding: BindingInput) => void
   updateBinding: (
     elementId: string,
@@ -117,6 +120,15 @@ const cloneElement = (element: GraphElement): GraphElement => ({
   properties: cloneValue(element.properties),
   bindings: element.bindings.map(binding => ({ ...binding })),
   hoverInteraction: { ...element.hoverInteraction }
+})
+
+const duplicateGraphElement = (
+  element: GraphElement,
+  parentId: string | null
+): GraphElement => ({
+  ...cloneElement(element),
+  id: nanoid(),
+  parentId
 })
 
 const createSnapshot = (state: DiagramState): DiagramSnapshot => ({
@@ -341,6 +353,140 @@ export const useDiagramStore = create<DiagramState>((set) => ({
 
       return {
         elements,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  duplicateElement: id => {
+    set(state => {
+      const target = state.elements.find(element => element.id === id)
+      if (!target) {
+        return {}
+      }
+
+      const childrenByParent = state.elements.reduce<Map<string | null, GraphElement[]>>((map, element) => {
+        const key = element.parentId
+        const bucket = map.get(key) ?? []
+        bucket.push(element)
+        map.set(key, bucket)
+        return map
+      }, new Map())
+
+      const collectSubtree = (currentId: string, acc: Set<string>) => {
+        acc.add(currentId)
+        const children = childrenByParent.get(currentId) ?? []
+        children.forEach(child => collectSubtree(child.id, acc))
+      }
+
+      const subtreeIds = new Set<string>()
+      collectSubtree(id, subtreeIds)
+
+      const insertionIndex = state.elements.reduce((lastIndex, element, index) => {
+        if (subtreeIds.has(element.id)) {
+          return index
+        }
+        return lastIndex
+      }, -1)
+
+      const clones: GraphElement[] = []
+      const cloneWithChildren = (source: GraphElement, parentId: string | null) => {
+        const cloned = duplicateGraphElement(source, parentId)
+        clones.push(cloned)
+        const children = childrenByParent.get(source.id) ?? []
+        children.forEach(child => cloneWithChildren(child, cloned.id))
+      }
+
+      cloneWithChildren(target, target.parentId)
+
+      if (clones.length === 0) {
+        return {}
+      }
+
+      const nextElements = [...state.elements]
+      nextElements.splice(insertionIndex + 1, 0, ...clones)
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements: nextElements,
+        selectedId: clones[0].id,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  bringElementForward: id => {
+    set(state => {
+      const currentIndex = state.elements.findIndex(element => element.id === id)
+      if (currentIndex === -1) {
+        return {}
+      }
+
+      const parentId = state.elements[currentIndex].parentId
+      const nextSibling = (() => {
+        for (let index = currentIndex + 1; index < state.elements.length; index += 1) {
+          if (state.elements[index].parentId === parentId) {
+            return state.elements[index]
+          }
+        }
+        return null
+      })()
+
+      if (!nextSibling) {
+        return {}
+      }
+
+      const working = [...state.elements]
+      const [element] = working.splice(currentIndex, 1)
+      const siblingIndex = working.findIndex(candidate => candidate.id === nextSibling.id)
+      working.splice(siblingIndex + 1, 0, element)
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements: working,
+        history: { past, future: [] },
+        canUndo: past.length > 0,
+        canRedo: false
+      }
+    })
+  },
+  sendElementBackward: id => {
+    set(state => {
+      const currentIndex = state.elements.findIndex(element => element.id === id)
+      if (currentIndex === -1) {
+        return {}
+      }
+
+      const parentId = state.elements[currentIndex].parentId
+      const previousSibling = (() => {
+        for (let index = currentIndex - 1; index >= 0; index -= 1) {
+          if (state.elements[index].parentId === parentId) {
+            return state.elements[index]
+          }
+        }
+        return null
+      })()
+
+      if (!previousSibling) {
+        return {}
+      }
+
+      const working = [...state.elements]
+      const [element] = working.splice(currentIndex, 1)
+      const siblingIndex = working.findIndex(candidate => candidate.id === previousSibling.id)
+      working.splice(siblingIndex, 0, element)
+
+      const snapshot = createSnapshot(state)
+      const past = [...state.history.past, snapshot]
+
+      return {
+        elements: working,
         history: { past, future: [] },
         canUndo: past.length > 0,
         canRedo: false
