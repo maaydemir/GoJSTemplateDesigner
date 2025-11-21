@@ -20,3 +20,5 @@ The repository also contains a `Vercel Preview Deploy` GitHub Actions workflow t
 - `VERCEL_PROJECT_ID`: The ID of the Vercel project for this app.
 
 When the workflow runs, it builds the Vite app, deploys a preview to Vercel, posts the unique preview URL as a PR comment, and registers a deployment entry so the PR shows a button that opens the preview.
+
+If any of the secrets above are missing, the workflow will fail early with a clear message instead of prompting for `vercel login`.
